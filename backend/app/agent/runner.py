@@ -58,8 +58,33 @@ class TaskRunner:
         self._user_id = user_id
         # 产物工具落盘上下文（版本号跨 start/resume 连续 → v1/v2/… 版本链）
         self._tool_ctx = ToolContext(
-            user_id=user_id, task_id=task_id, storage=get_storage()
+            user_id=user_id,
+            task_id=task_id,
+            storage=get_storage(),
+            db_factory=db_factory,
         )
+        self._seed_tool_version()
+
+    def _seed_tool_version(self) -> None:
+        """重建 runner（预览反馈续跑）时按库中版本链对齐存储版本计数器。
+
+        preview_ready 后 runner 从注册表移除，反馈时重建；若计数器归零，
+        续跑的保存会覆写 v1 目录而库里记为 v2，导致存储/库版本错位。
+        """
+        from sqlalchemy import func, select
+
+        from app.models import Artifact, ArtifactVersion
+
+        if self._db_factory is None:
+            return
+        with self._db_factory() as db:
+            max_v = db.execute(
+                select(func.max(ArtifactVersion.version))
+                .join(Artifact, Artifact.id == ArtifactVersion.artifact_id)
+                .where(Artifact.task_id == self.task_id)
+            ).scalar_one_or_none()
+        if max_v:
+            self._tool_ctx.seed_version(int(max_v))
 
     def steer(self, content: str) -> None:
         """执行中插话入队（tools 节点循环间隙取出注入）。"""
@@ -96,6 +121,7 @@ class TaskRunner:
                 yield {"type": "preview_ready", "task_id": self.task_id, "preview": preview}
                 return
             await self._set_status(TASK_DELIVERED)
+            await self._finalize_artifacts()
             await self._persist_milestone("任务已交付 ✅", kind="delivered")
             yield {"type": "task_completed", "task_id": self.task_id, "status": TASK_DELIVERED}
         except Exception as exc:  # noqa: BLE001 统一转失败事件，不让 SSE 半途崩掉
@@ -176,6 +202,35 @@ class TaskRunner:
                 content,
                 extra={"task_id": self.task_id, "kind": kind},
             )
+
+    async def _finalize_artifacts(self) -> None:
+        """满意交付：补齐各产物最新版本的最终下载文件（伴随文件缺失才现算）。"""
+        from sqlalchemy import select
+
+        from app.models import Artifact, ArtifactVersion
+        from app.services.artifact_service import ensure_final
+
+        def _sync() -> None:
+            with self._db_factory() as db:
+                rows = db.execute(
+                    select(Artifact.kind, ArtifactVersion)
+                    .join(ArtifactVersion, ArtifactVersion.artifact_id == Artifact.id)
+                    .where(Artifact.task_id == self.task_id)
+                    .order_by(ArtifactVersion.version.desc())
+                ).all()
+                seen: set[str] = set()
+                for kind, ver in rows:
+                    if ver.artifact_id in seen:  # 每个产物只处理最新版本
+                        continue
+                    seen.add(ver.artifact_id)
+                    try:
+                        ensure_final(db, ver, kind=kind)
+                    except Exception:  # noqa: BLE001 转换失败不阻塞交付
+                        logger.warning(
+                            "产物最终格式转换失败 task=%s kind=%s", self.task_id, kind
+                        )
+
+        await asyncio.to_thread(_sync)
 
 
 class RunnerRegistry:

@@ -41,7 +41,7 @@ async def test_save_document_writes_md_and_docx(registry, storage):
 
     from docx import Document
 
-    doc = Document(io.BytesIO(storage.read(f"{USER}/{TASK}/v2/document.docx")))
+    doc = Document(io.BytesIO(storage.read(f"{USER}/{TASK}/v1/document.docx")))
     texts = [p.text for p in doc.paragraphs]
     assert "周报" in texts and "完成工具层" in texts
 
@@ -133,7 +133,7 @@ async def test_save_slides_html_and_pptx(registry, storage):
 
     from pptx import Presentation
 
-    prs = Presentation(io.BytesIO(storage.read(f"{USER}/{TASK}/v2/slides.pptx")))
+    prs = Presentation(io.BytesIO(storage.read(f"{USER}/{TASK}/v1/slides.pptx")))
     assert len(prs.slides) == 2
 
 
@@ -146,7 +146,8 @@ async def test_versions_increment_across_saves(registry, storage):
     await registry.execute("save_document", {"title": "a", "content_md": "一版"})
     await registry.execute("save_document", {"title": "a", "content_md": "二版"})
     assert storage.exists(f"{USER}/{TASK}/v1/document.md")
-    assert storage.exists(f"{USER}/{TASK}/v3/document.md")  # 第二次 md 落 v3（v2 为 docx）
+    assert storage.exists(f"{USER}/{TASK}/v1/document.docx")  # 一次保存同目录
+    assert storage.exists(f"{USER}/{TASK}/v2/document.md")
 
 
 async def test_context_missing_raises_tool_error():

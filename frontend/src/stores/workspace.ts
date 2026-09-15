@@ -1,6 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import {
+  listTaskArtifacts,
+  type ArtifactInfo,
+} from '../api/artifacts'
+import {
   createSession,
   listMessages,
   listSessions,
@@ -32,6 +36,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const messages = ref<MessageInfo[]>([])
   const streaming = ref(false)
   const activePreview = ref<ActivePreview | null>(null)
+  const artifacts = ref<ArtifactInfo[]>([])
 
   async function refreshSessions() {
     sessions.value = await listSessions()
@@ -55,6 +60,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const previewMsg = [...raw].reverse().find((m) => m.extra?.kind === 'preview')
     activePreview.value =
       pending && previewMsg ? { taskId: pending.id, content: previewMsg.content } : null
+    // 恢复最近任务的产物版本链（交付/预览任务均可见可下载）
+    const artifactTask = pending ?? tasks[0]
+    if (artifactTask) {
+      void refreshArtifacts(artifactTask.id)
+    } else {
+      artifacts.value = []
+    }
+  }
+
+  /** 拉取任务产物版本链（preview_ready / 交付后 / 会话切换时）。 */
+  async function refreshArtifacts(taskId: string) {
+    artifacts.value = await listTaskArtifacts(taskId).catch(() => [])
   }
 
   async function switchMode(mode: 'chat' | 'work') {
@@ -169,6 +186,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       pushSystem(`🔁 已在执行中注入：${ev.content}`)
     } else if (ev.type === 'task_revising') {
       activePreview.value = null
+      artifacts.value = [] // 版本链变动中，待新 preview_ready 刷新
       pushSystem('✏️ 按修改意见调整中…')
     } else if (ev.type === 'preview_ready') {
       const content = ev.preview?.preview ?? ''
@@ -180,9 +198,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         created_at: null,
       })
       activePreview.value = { taskId: ev.task_id, content }
+      void refreshArtifacts(ev.task_id)
       pushSystem('🎯 预览就绪：满意请点「满意，交付」；或直接输入修改意见')
     } else if (ev.type === 'task_completed') {
       activePreview.value = null
+      void refreshArtifacts(ev.task_id) // 交付后仍可查看/下载（final_format 已补齐）
       pushSystem('✅ 任务已交付')
     } else if (ev.type === 'task_failed') {
       activePreview.value = null
@@ -233,6 +253,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     messages,
     streaming,
     activePreview,
+    artifacts,
     refreshSessions,
     newSession,
     selectSession,
@@ -240,5 +261,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     send,
     resolveRoute,
     approvePreview,
+    refreshArtifacts,
   }
 })

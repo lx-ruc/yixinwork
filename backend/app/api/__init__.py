@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 
-from app.api import chat, health, sessions, tasks
+from app.api import artifacts, chat, health, sessions, tasks
 
 
 def register_routers(app: FastAPI) -> None:
@@ -10,3 +10,4 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(sessions.router)
     app.include_router(chat.router)
     app.include_router(tasks.router)
+    app.include_router(artifacts.router)

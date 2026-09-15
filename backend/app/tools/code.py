@@ -49,8 +49,28 @@ async def _run_python_code(args: dict) -> str:
     for name, data in result.files.items():
         key = artifact_key(ctx.user_id, ctx.task_id, ctx.next_version(), name)
         ctx.storage.save(key, data)
+        _record_data_file(name, key, data)
         saved.append({"kind": "sandbox_file", "name": name, "key": key})
     return _result_text(result, saved)
+
+
+def _record_data_file(name: str, key: str, data: bytes) -> None:
+    """沙箱产物落版本链：csv 附带结构化预览数据，其余仅可下载。"""
+    from app.tools.artifacts import _record
+
+    payload = None
+    fmt = "binary"
+    if name.lower().endswith(".csv"):
+        import csv
+        import io
+
+        try:
+            rows = list(csv.reader(io.StringIO(data.decode("utf-8", errors="replace"))))
+            payload = {"title": name, "headers": rows[0] if rows else [], "rows": rows[1:]}
+            fmt = "csv"
+        except Exception:  # noqa: BLE001 csv 解析失败按二进制处理
+            payload = None
+    _record("data", name, fmt, key, payload)
 
 
 def register_code_tools(registry: ToolRegistry) -> None:

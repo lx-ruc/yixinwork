@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     sandbox_cpus: float = 1.0
     sandbox_max_output_mb: int = 20
 
+    # 产物签名下载（HMAC；生产必须经环境变量覆盖）
+    download_signing_secret: str = "dev-insecure-download-secret"
+    download_url_ttl_seconds: int = 600
+
     # GLM（OpenAI 兼容协议）
     glm_api_key: str = ""
     glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"

@@ -57,12 +57,12 @@
 
 ## 8. 产物生命周期（artifact-lifecycle）
 
-- [ ] 8.1 产物与版本模型：任务↔产物↔版本关联、文件落盘、元数据入 PG
-- [ ] 8.2 预览接口：按类型返回可渲染预览数据（md/html/表格/slides）
-- [ ] 8.3 预览安全：sandbox iframe + CSP，XSS 测试用例（含 script 注入验证）
-- [ ] 8.4 版本链交互：前端版本切换、历史版本查看、修改指令默认跟随最近产物
-- [ ] 8.5 满意确认 + 下载转换（md→docx / 数据→xlsx / HTML→png / slides→pptx·pdf）
-- [ ] 8.6 签名 URL 下载端点：过期时间、所有者校验、路径穿越防护
+- [x] 8.1 产物与版本模型：任务↔产物↔版本关联、文件落盘、元数据入 PG
+- [x] 8.2 预览接口：按类型返回可渲染预览数据（md/html/表格/slides）
+- [x] 8.3 预览安全：sandbox iframe + CSP，XSS 测试用例（含 script 注入验证）
+- [x] 8.4 版本链交互：前端版本切换、历史版本查看、修改指令默认跟随最近产物
+- [x] 8.5 满意确认 + 下载转换（md→docx / 数据→xlsx / HTML→png / slides→pptx·pdf）
+- [x] 8.6 签名 URL 下载端点：过期时间、所有者校验、路径穿越防护
 
 ## 9. 用量记录（usage-tracking）
 

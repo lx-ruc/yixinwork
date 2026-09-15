@@ -1,11 +1,12 @@
 """产物工具：文档 / 海报 / 表格 / 幻灯片。
 
 中间格式策略（决策 5/C）：文档=Markdown、海报与幻灯片=HTML、表格=xlsx+HTML 预览。
-下载转换（md→docx、HTML→png、slides→pptx）在工具侧同步产出一次，
-预览与签名 URL 下载由 G8 产物生命周期承接。
+保存即：中间格式落盘 + 版本链落库（artifact_service.record_version）+
+伴随最终格式文件（docx/png/xlsx/pptx，下载时直接复用）。
 """
 
 import asyncio
+import io
 import json
 import re
 from html import escape
@@ -18,9 +19,15 @@ MAX_CONTENT_BYTES = 200_000  # 单产物内容上限（防滥用）
 
 
 def _save(filename: str, content: str | bytes) -> str:
-    """按 {user}/{task}/v{n}/{filename} 落盘，返回存储 key。"""
+    """按 {user}/{task}/v{n}/{filename} 落盘（自增版本），返回存储 key。"""
     ctx = get_tool_context()
-    key = artifact_key(ctx.user_id, ctx.task_id, ctx.next_version(), filename)
+    return _save_at(ctx.next_version(), filename, content)
+
+
+def _save_at(version: int, filename: str, content: str | bytes) -> str:
+    """同一版本目录写文件（一次产物保存的中间格式与伴随文件同目录）。"""
+    ctx = get_tool_context()
+    key = artifact_key(ctx.user_id, ctx.task_id, version, filename)
     data = content.encode("utf-8") if isinstance(content, str) else content
     if len(data) > MAX_CONTENT_BYTES:
         raise ToolError(f"内容超出上限（{len(data)} > {MAX_CONTENT_BYTES} 字节）")
@@ -28,21 +35,27 @@ def _save(filename: str, content: str | bytes) -> str:
     return key
 
 
-async def _save_document(args: dict) -> str:
-    title = args["title"].strip()
-    content = args["content_md"].strip()
-    if not content:
-        raise ToolError("文档内容为空")
-    key = _save("document.md", f"# {title}\n\n{content}\n")
-    try:
-        docx_key = _save_docx(title, content)
-        extra = f"；docx={docx_key}"
-    except Exception:  # 转换失败不阻塞预览（md 为主格式）
-        extra = ""
-    return json.dumps({"saved": [{"kind": "document", "key": key}], "note": f"文档《{title}》已保存{extra}"}, ensure_ascii=False)
+def _record(kind: str, title: str, fmt: str, file_key: str, payload: dict | None) -> None:
+    """版本链落库（无 DB 工厂的纯单测场景跳过）。"""
+    from app.services.artifact_service import record_version
+
+    ctx = get_tool_context()
+    if ctx.db_factory is None:
+        return
+    record_version(
+        ctx.db_factory,
+        user_id=ctx.user_id,
+        task_id=ctx.task_id,
+        kind=kind,
+        title=title,
+        intermediate_format=fmt,
+        file_key=file_key,
+        preview_payload=payload,
+    )
 
 
-def _save_docx(title: str, markdown: str) -> str:
+def markdown_to_docx_bytes(title: str, markdown: str) -> bytes:
+    """Markdown → docx（标题层级 + 列表 + 段落；满意后下载转换复用）。"""
     from docx import Document
 
     doc = Document()
@@ -57,11 +70,27 @@ def _save_docx(title: str, markdown: str) -> str:
             doc.add_paragraph(re.sub(r"^[-*]\s+", "", text), style="List Bullet")
         else:
             doc.add_paragraph(text)
-    import io
-
     buf = io.BytesIO()
     doc.save(buf)
-    return _save("document.docx", buf.getvalue())
+    return buf.getvalue()
+
+
+async def _save_document(args: dict) -> str:
+    title = args["title"].strip()
+    content = args["content_md"].strip()
+    if not content:
+        raise ToolError("文档内容为空")
+    from app.tools.context import get_tool_context
+
+    v = get_tool_context().next_version()
+    key = _save_at(v, "document.md", f"# {title}\n\n{content}\n")
+    try:
+        docx_key = _save_at(v, "document.docx", markdown_to_docx_bytes(title, content))
+        extra = f"；docx={docx_key}"
+    except Exception:  # 转换失败不阻塞预览（md 为主格式）
+        extra = ""
+    _record("document", title, "markdown", key, {"title": title})
+    return json.dumps({"saved": [{"kind": "document", "key": key}], "note": f"文档《{title}》已保存{extra}"}, ensure_ascii=False)
 
 
 POSTER_HTML_TEMPLATE = """<!DOCTYPE html>
@@ -99,6 +128,7 @@ async def _save_poster(args: dict) -> str:
         png_note = f"；png={png_key}"
     except Exception as exc:  # 渲染器缺失/失败不阻塞，HTML 预览兜底
         png_note = f"；png渲染跳过（{type(exc).__name__}）"
+    _record("poster", title, "html", key, {"title": title})
     return json.dumps({"saved": [{"kind": "poster", "key": key}], "note": f"海报《{title}》已保存{png_note}"}, ensure_ascii=False)
 
 
@@ -142,7 +172,10 @@ async def _save_table(args: dict) -> str:
         ws.append([str(c) for c in r])
     buf = io.BytesIO()
     wb.save(buf)
-    xlsx_key = _save("table.xlsx", buf.getvalue())
+    from app.tools.context import get_tool_context
+
+    v = get_tool_context().next_version()
+    xlsx_key = _save_at(v, "table.xlsx", buf.getvalue())
 
     # HTML 预览数据（G8 预览接口直接可用）
     thead = "".join(f"<th>{escape(str(h))}</th>" for h in headers)
@@ -156,7 +189,14 @@ async def _save_table(args: dict) -> str:
         f"<body><h3>{escape(title)}</h3><table><thead><tr>{thead}</tr></thead>"
         f"<tbody>{tbody}</tbody></table></body></html>"
     )
-    html_key = _save("table_preview.html", html)
+    html_key = _save_at(v, "table_preview.html", html)
+    _record(
+        "table",
+        title,
+        "html_table",
+        html_key,
+        {"title": title, "headers": [str(h) for h in headers], "rows": [[str(c) for c in r] for r in rows]},
+    )
     return json.dumps(
         {"saved": [{"kind": "table", "key": xlsx_key}, {"kind": "table_preview", "key": html_key}],
          "note": f"表格《{title}》已保存（{len(rows)} 行）"},
@@ -189,22 +229,32 @@ async def _save_slides(args: dict) -> str:
     for s in slides:
         items = "".join(f"<li>{escape(str(b))}</li>" for b in s.get("bullets", []))
         parts.append(f"<div class='slide'><h2>{escape(s['title'])}</h2><ul>{items}</ul></div>")
-    html_key = _save(
-        "slides.html", SLIDE_HTML_TEMPLATE.format(title=escape(title), slides="".join(parts))
+    from app.tools.context import get_tool_context
+
+    v = get_tool_context().next_version()
+    html_key = _save_at(
+        v, "slides.html", SLIDE_HTML_TEMPLATE.format(title=escape(title), slides="".join(parts))
     )
 
     pptx_key = ""
     try:
-        pptx_key = _save_pptx(title, slides)
+        pptx_key = _save_at(v, "slides.pptx", _pptx_bytes(title, slides))
     except Exception:
         pass  # pptx 转换为尽力而为；HTML 预览为主格式（保真度降级路径）
     note = f"幻灯片《{title}》（{len(slides)} 页）已保存"
     if pptx_key:
         note += f"；pptx={pptx_key}"
+    _record(
+        "slides",
+        title,
+        "html_slides",
+        html_key,
+        {"title": title, "slides": slides},
+    )
     return json.dumps({"saved": [{"kind": "slides", "key": html_key}], "note": note}, ensure_ascii=False)
 
 
-def _save_pptx(title: str, slides: list[dict]) -> str:
+def _pptx_bytes(title: str, slides: list[dict]) -> bytes:
     from pptx import Presentation
     from pptx.util import Pt
 
@@ -228,7 +278,7 @@ def _save_pptx(title: str, slides: list[dict]) -> str:
 
     buf = io.BytesIO()
     prs.save(buf)
-    return _save("slides.pptx", buf.getvalue())
+    return buf.getvalue()
 
 
 def register_artifact_tools(registry: ToolRegistry) -> None:
