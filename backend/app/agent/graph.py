@@ -28,13 +28,14 @@ SYSTEM_PROMPT = """你是「亿心工作」工作模式的执行智能体，负�
 4. 工具保存完成后，用一两句话说明产出了什么即可，不必复述全部内容。"""
 
 
-class AgentState(TypedDict):
-    messages: Annotated[list, _concat]
-    iterations: Annotated[int, operator.add]
-
-
 def _concat(current: list, update: list) -> list:
     return [*current, *update]
+
+
+class AgentState(TypedDict):
+    # 注意：_concat 必须先定义——3.12 类体注解立即求值（3.14 起 PEP 649 才延迟）
+    messages: Annotated[list, _concat]
+    iterations: Annotated[int, operator.add]
 
 
 def build_agent_graph(

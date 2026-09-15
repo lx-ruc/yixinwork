@@ -23,10 +23,26 @@
 │   ├── alembic/        # 数据库迁移
 │   └── tests/
 ├── frontend/           # Vue 3 + Element Plus + Vite
-└── docker-compose.yml  # 本地基础设施（PostgreSQL 等）
+├── docker-compose.yml  # 一键启动（postgres + backend + frontend）
+└── DEPLOY.md           # 部署指南（本地一键启动 / 迁服务器差异清单）
 ```
 
-## 本地启动
+## 快速开始（docker 一键启动）
+
+```bash
+cp backend/.env.example backend/.env    # 填 GLM_API_KEY、DOWNLOAD_SIGNING_SECRET
+docker compose build backend frontend
+docker compose --profile tools build sandbox   # 沙箱镜像（一次性）
+docker compose up -d
+
+curl http://localhost:8001/api/health   # {"status":"ok","db":"ok"}
+open http://localhost:5180
+```
+
+完整说明（含国内镜像加速、常见问题、**迁服务器配置差异清单**）见
+[`DEPLOY.md`](./DEPLOY.md)。
+
+## 本地开发（裸跑后端）
 
 ```bash
 # 1. 基础设施（PostgreSQL）
@@ -42,7 +58,7 @@ uv run uvicorn app.main:app --reload --port 8001
 # 3. 前端
 cd frontend
 npm install
-npm run dev                   # http://localhost:5173
+npm run dev -- --port 5180    # http://localhost:5180（vite 代理 /api → 8001）
 ```
 
 ## 关键约定

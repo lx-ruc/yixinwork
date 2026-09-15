@@ -10,6 +10,7 @@ from app.agent import recover_interrupted_tasks
 from app.api import register_routers
 from app.config import get_settings
 from app.db import SessionLocal
+from app.middleware.ratelimit import install_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    install_rate_limit(app)
     register_routers(app)
     return app
 

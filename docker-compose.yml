@@ -1,5 +1,8 @@
 name: yixin-agent
 
+# 国内网络加速（可选）：REGISTRY=docker.m.daocloud.io/ docker compose build
+x-registry: &registry ${REGISTRY:-}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -19,7 +22,58 @@ services:
       timeout: 3s
       retries: 10
 
-  # backend / frontend / sandbox-runner 服务在实现推进后逐步加入（见 tasks.md 组 7/10）
+  backend:
+    build:
+      context: ./backend
+      args:
+        REGISTRY: *registry
+    container_name: yixin-agent-backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://agent:agent@postgres:5432/agent_platform
+      STORAGE_ROOT: /app/data/artifacts
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5180,http://127.0.0.1:5180}
+      REQUIRE_USER_HEADER: ${REQUIRE_USER_HEADER:-false}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
+      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-120}
+      # GLM_API_KEY / GLM_MODEL 等经 backend/.env 注入（绝不入库）
+    env_file:
+      - path: ./backend/.env
+        required: false
+    ports:
+      - "8001:8001"
+    volumes:
+      - artifacts:/app/data
+      # 沙箱执行：经宿主 Docker daemon 创建一次性容器
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "uv run python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8001/api/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        REGISTRY: *registry
+    container_name: yixin-agent-frontend
+    ports:
+      # 宿主 5180（本机 5173 已被占用；部署可 FRONTEND_PORT=80 覆盖）
+      - "${FRONTEND_PORT:-5180}:80"
+    depends_on:
+      backend:
+        condition: service_started
+
+  # 沙箱基础镜像（仅供构建打标签，不常驻）：docker compose --profile tools build sandbox
+  sandbox:
+    build: ./backend/sandbox
+    image: yixin-sandbox:latest
+    profiles: ["tools"]
 
 volumes:
   pgdata:
+  artifacts:

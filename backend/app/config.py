@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # 内部运维接口（用量汇总查询）令牌；为空表示未启用（一律 403）
     internal_api_token: str = ""
 
+    # API 限流（按用户，缺身份头回退 IP）；<=0 关闭（测试态）
+    rate_limit_requests: int = 120
+    rate_limit_window_seconds: int = 60
+
     @property
     def origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
