@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useWorkspaceStore } from '../stores/workspace'
+import { useWorkspaceStore, type CardEntry } from '../stores/workspace'
+import type { MessageInfo } from '../api/sessions'
 
 const store = useWorkspaceStore()
 const input = ref('')
@@ -20,6 +21,18 @@ async function onSend() {
   } catch (e) {
     ElMessage.error(`发送失败: ${(e as Error).message}`)
   }
+}
+
+async function onResolve(messageId: string, action: 'confirm' | 'decline') {
+  try {
+    await store.resolveRoute(messageId, action)
+  } catch (e) {
+    ElMessage.error(`操作失败: ${(e as Error).message}`)
+  }
+}
+
+function cardOf(m: MessageInfo): CardEntry {
+  return m as CardEntry
 }
 
 watch(
@@ -46,17 +59,41 @@ watch(
 
     <div ref="streamRef" class="chat-stream">
       <el-empty v-if="store.messages.length === 0" description="开始对话吧" />
-      <div
-        v-for="m in store.messages"
-        :key="m.id || m.content.length"
-        class="msg-row"
-        :class="m.role"
-      >
-        <div class="bubble" :class="m.role">
-          <span class="content">{{ m.content }}</span>
-          <span v-if="m.id === ''" class="cursor">▌</span>
+      <template v-for="m in store.messages" :key="m.role + '-' + (m.id ?? m.content.length)">
+        <!-- 路由确认卡片：任务型消息弹出，确认入工作模式 / 拒绝回直答 -->
+        <div v-if="m.role === 'route_card'" class="msg-row assistant">
+          <div class="route-card">
+            <div class="route-title">🧭 这看起来像一项工作</div>
+            <div class="route-quote">“{{ m.content }}”</div>
+            <div class="route-reason">{{ cardOf(m).extra.reason }}</div>
+            <div v-if="cardOf(m).extra.status === 'pending'" class="route-actions">
+              <el-button
+                size="small"
+                type="primary"
+                :disabled="store.streaming"
+                @click="onResolve(m.id, 'confirm')"
+              >
+                切换到工作模式
+              </el-button>
+              <el-button size="small" :disabled="store.streaming" @click="onResolve(m.id, 'decline')">
+                继续对话
+              </el-button>
+            </div>
+            <div v-else class="route-result">
+              {{ cardOf(m).extra.status === 'confirmed' ? '✅ 已进入工作模式' : '↩ 已按普通对话回答' }}
+            </div>
+          </div>
         </div>
-      </div>
+        <!-- 系统提示行（任务创建等） -->
+        <div v-else-if="m.role === 'system'" class="system-row">{{ m.content }}</div>
+        <!-- 常规消息气泡 -->
+        <div v-else class="msg-row" :class="m.role">
+          <div class="bubble" :class="m.role">
+            <span class="content">{{ m.content }}</span>
+            <span v-if="m.id === ''" class="cursor">▌</span>
+          </div>
+        </div>
+      </template>
     </div>
 
     <footer class="chat-input">
@@ -119,6 +156,45 @@ watch(
 }
 .bubble.assistant {
   background: var(--el-fill-color-light);
+}
+.route-card {
+  max-width: 86%;
+  padding: 12px 14px;
+  border: 1px solid var(--el-color-primary-light-7);
+  border-left: 3px solid var(--el-color-primary);
+  border-radius: 10px;
+  background: var(--el-color-primary-light-9);
+  font-size: 14px;
+}
+.route-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.route-quote {
+  color: var(--el-text-color-secondary);
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+.route-reason {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+.route-actions {
+  display: flex;
+  gap: 8px;
+}
+.route-result {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.system-row {
+  align-self: center;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 8px;
+  padding: 4px 10px;
 }
 .cursor {
   animation: blink 1s step-start infinite;

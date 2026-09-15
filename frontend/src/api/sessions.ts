@@ -19,10 +19,21 @@ export interface MessageInfo {
   created_at: string | null
 }
 
+export interface TaskInfo {
+  id: string
+  status: string
+  instruction: string
+  error: string | null
+  created_at: string | null
+}
+
 export type StreamEvent =
   | { type: 'user_message'; message: MessageInfo }
   | { type: 'delta'; content: string }
-  | { type: 'done'; message: MessageInfo; usage: unknown }
+  | { type: 'route_card'; message: MessageInfo; reason: string }
+  | { type: 'mode_switched'; mode: 'chat' | 'work' }
+  | { type: 'task_created'; task: TaskInfo }
+  | { type: 'done'; message: MessageInfo | null; usage: unknown }
   | { type: 'error'; detail: string }
 
 export const listSessions = () => api<SessionInfo[]>('/sessions')
@@ -33,16 +44,16 @@ export const patchSession = (id: string, body: { mode?: string }) =>
 export const listMessages = (id: string) =>
   api<MessageInfo[]>(`/sessions/${id}/messages`)
 
-/** 发送消息并以 SSE 接收事件流（直答模式）。 */
-export async function streamMessage(
-  sessionId: string,
-  content: string,
+/** POST + SSE 事件流解析（ReadableStream，事件以空行分隔）。 */
+async function ssePost(
+  path: string,
+  body: unknown,
   onEvent: (ev: StreamEvent) => void,
 ): Promise<void> {
-  const resp = await fetch(`/api/sessions/${sessionId}/messages`, {
+  const resp = await fetch(`/api${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-User-Id': getUserId() },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(body),
   })
   if (!resp.ok || !resp.body) {
     const text = await resp.text().catch(() => '')
@@ -63,3 +74,23 @@ export async function streamMessage(
     }
   }
 }
+
+/** 发送消息并以 SSE 接收事件流（普通对话=路由/直答；工作模式=任务流）。 */
+export const streamMessage = (
+  sessionId: string,
+  content: string,
+  onEvent: (ev: StreamEvent) => void,
+) => ssePost(`/sessions/${sessionId}/messages`, { content }, onEvent)
+
+/** 确认卡片动作：confirm=进入工作模式；decline=原消息直答。 */
+export const routeConfirm = (
+  sessionId: string,
+  messageId: string,
+  action: 'confirm' | 'decline',
+  onEvent: (ev: StreamEvent) => void,
+) =>
+  ssePost(
+    `/sessions/${sessionId}/route-confirm`,
+    { message_id: messageId, action },
+    onEvent,
+  )
