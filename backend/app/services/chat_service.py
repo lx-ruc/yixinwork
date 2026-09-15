@@ -5,6 +5,7 @@
 
 from collections.abc import Iterator
 from datetime import datetime, timezone
+import time
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.llm.glm import ChatChunk, LLMError
 from app.models import ChatSession, Message, ROLE_ASSISTANT, ROLE_USER
 from app.services.routing import RouteDecision, get_classifier
+from app.services.usage_service import record_llm_call
 
 HISTORY_WINDOW = 20  # 送入 LLM 的最近消息条数
 
@@ -58,7 +60,12 @@ def stream_direct_answer(
         user_msg = persist_message(db, session, user_id, ROLE_USER, content)
         yield {"type": "user_message", "message": message_dict(user_msg)}
         yield from _answer_stream(
-            db=db, session=session, user_id=user_id, llm=llm, messages=messages
+            db=db,
+            session=session,
+            user_id=user_id,
+            llm=llm,
+            messages=messages,
+            db_factory=db_factory,
         )
 
 
@@ -107,16 +114,28 @@ def stream_declined_answer(
             if m.role in ("user", "assistant"):
                 messages.append({"role": m.role, "content": m.content})
         yield from _answer_stream(
-            db=db, session=session, user_id=user_id, llm=llm, messages=messages
+            db=db,
+            session=session,
+            user_id=user_id,
+            llm=llm,
+            messages=messages,
+            db_factory=db_factory,
         )
 
 
 def _answer_stream(
-    *, db: Session, session: ChatSession, user_id: str, llm, messages: list[dict]
+    *,
+    db: Session,
+    session: ChatSession,
+    user_id: str,
+    llm,
+    messages: list[dict],
+    db_factory: sessionmaker,
 ) -> Iterator[dict]:
-    """LLM 流式调用 + 助手消息持久化（user_message 事件由调用方负责）。"""
+    """LLM 流式调用 + 助手消息持久化 + llm_call 用量埋点（user_message 由调用方负责）。"""
     accumulated: list[str] = []
     usage: dict | None = None
+    started = time.monotonic()
     try:
         chunk: ChatChunk
         for chunk in llm.stream_chat(messages):
@@ -126,9 +145,26 @@ def _answer_stream(
             if chunk.usage:
                 usage = chunk.usage
     except LLMError as exc:
+        record_llm_call(
+            db_factory,
+            user_id=user_id,
+            session_id=session.id,
+            model=getattr(llm, "model", None),
+            duration_ms=int((time.monotonic() - started) * 1000),
+            detail={"error": str(exc)},
+        )
         yield {"type": "error", "detail": str(exc)}
         return
 
+    record_llm_call(
+        db_factory,
+        user_id=user_id,
+        session_id=session.id,
+        model=getattr(llm, "model", None),
+        input_tokens=(usage or {}).get("input_tokens"),
+        output_tokens=(usage or {}).get("output_tokens"),
+        duration_ms=int((time.monotonic() - started) * 1000),
+    )
     full = "".join(accumulated)
     assistant_msg = persist_message(db, session, user_id, ROLE_ASSISTANT, full)
     yield {

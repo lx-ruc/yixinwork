@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     require_user_header: bool = False
     dev_default_user_id: str = "dev-local-user"
 
+    # 内部运维接口（用量汇总查询）令牌；为空表示未启用（一律 403）
+    internal_api_token: str = ""
+
     @property
     def origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]

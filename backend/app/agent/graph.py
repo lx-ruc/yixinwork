@@ -5,7 +5,8 @@
 
 import asyncio
 import operator
-from typing import Annotated, Any, TypedDict
+import time
+from typing import Annotated, Any, Callable, Coroutine, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
@@ -36,12 +37,26 @@ def _concat(current: list, update: list) -> list:
     return [*current, *update]
 
 
-def build_agent_graph(*, llm, registry: ToolRegistry, inbox: asyncio.Queue, checkpointer):
-    """llm: chat model（此处统一 bind_tools）；inbox: 执行中插话队列（runner 持有）。"""
+def build_agent_graph(
+    *,
+    llm,
+    registry: ToolRegistry,
+    inbox: asyncio.Queue,
+    checkpointer,
+    on_llm_usage: Callable[[Any, int], Coroutine] | None = None,
+):
+    """llm: chat model（此处统一 bind_tools）；inbox: 执行中插话队列（runner 持有）。
+
+    on_llm_usage: 每轮 LLM 调用后回调 (ai_message, elapsed_ms)，用量埋点用；
+    回调自身负责吞异常，不得影响执行流。
+    """
     llm = llm.bind_tools(registry.openai_schemas())
     async def agent_node(state: AgentState) -> dict:
+        started = time.monotonic()
         # 系统提示不入 state（每次调用前置；检查点保持纯对话史）
         ai = await llm.ainvoke([SystemMessage(content=SYSTEM_PROMPT), *state["messages"]])
+        if on_llm_usage is not None:
+            await on_llm_usage(ai, int((time.monotonic() - started) * 1000))
         return {"messages": [ai], "iterations": 1}
 
     async def tools_node(state: AgentState) -> dict:
