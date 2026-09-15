@@ -2,10 +2,11 @@
 
 from fastapi import FastAPI
 
-from app.api import chat, health, sessions
+from app.api import chat, health, sessions, tasks
 
 
 def register_routers(app: FastAPI) -> None:
     app.include_router(health.router)
     app.include_router(sessions.router)
     app.include_router(chat.router)
+    app.include_router(tasks.router)

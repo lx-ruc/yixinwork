@@ -4,9 +4,11 @@ import {
   createSession,
   listMessages,
   listSessions,
+  listTasks,
   patchSession,
   routeConfirm,
   streamMessage,
+  taskFeedback,
   type MessageInfo,
   type SessionInfo,
 } from '../api/sessions'
@@ -17,12 +19,19 @@ export type CardEntry = MessageInfo & {
   extra: { reason: string; status: 'pending' | 'confirmed' | 'declined' }
 }
 
-/** 工作台全局状态：会话列表、当前会话、消息、流式状态。 */
+/** 预览就绪状态：满意交付 / 输入修改意见（跟随最近任务）。 */
+export interface ActivePreview {
+  taskId: string
+  content: string
+}
+
+/** 工作台全局状态：会话列表、当前会话、消息、流式状态、预览反馈。 */
 export const useWorkspaceStore = defineStore('workspace', () => {
   const sessions = ref<SessionInfo[]>([])
   const currentSession = ref<SessionInfo | null>(null)
   const messages = ref<MessageInfo[]>([])
   const streaming = ref(false)
+  const activePreview = ref<ActivePreview | null>(null)
 
   async function refreshSessions() {
     sessions.value = await listSessions()
@@ -36,7 +45,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function selectSession(s: SessionInfo) {
     currentSession.value = s
-    messages.value = expandCards(await listMessages(s.id))
+    const [raw, tasks] = await Promise.all([
+      listMessages(s.id),
+      listTasks(s.id).catch(() => []),
+    ])
+    messages.value = expandCards(raw)
+    // 恢复未完结任务的预览反馈态
+    const pending = tasks.find((t) => t.status === 'preview_ready')
+    const previewMsg = [...raw].reverse().find((m) => m.extra?.kind === 'preview')
+    activePreview.value =
+      pending && previewMsg ? { taskId: pending.id, content: previewMsg.content } : null
   }
 
   async function switchMode(mode: 'chat' | 'work') {
@@ -54,7 +72,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (idx >= 0) sessions.value[idx] = updated
   }
 
-  /** 发送消息：SSE 事件驱动渲染。 */
+  /** 发送消息：SSE 事件驱动渲染（语义由后端按会话模式/任务状态决定）。 */
   async function send(content: string) {
     if (!currentSession.value || streaming.value) return
     streaming.value = true
@@ -83,7 +101,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  /** 统一处理流事件（直答/拒绝直答共用 delta·done；路由卡片/任务事件各自入流）。 */
+  /** 预览满意 → 交付（修改意见走普通 send：preview_ready 分支即修改续跑）。 */
+  async function approvePreview() {
+    if (!activePreview.value || streaming.value) return
+    streaming.value = true
+    try {
+      await taskFeedback(activePreview.value.taskId, 'approve', handleEvent)
+    } finally {
+      streaming.value = false
+    }
+  }
+
+  function pushSystem(text: string) {
+    messages.value.push({
+      id: `sys-${messages.value.length}`,
+      role: 'system',
+      content: text,
+      extra: null,
+      created_at: null,
+    })
+  }
+
+  /** 统一处理流事件（直答 delta·done；路由卡片；Agent 执行过程）。 */
   function handleEvent(ev: Parameters<Parameters<typeof streamMessage>[2]>[0]) {
     if (ev.type === 'user_message') {
       messages.value.push(ev.message)
@@ -109,13 +148,45 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         created_at: ev.message.created_at,
       } satisfies CardEntry)
     } else if (ev.type === 'task_created') {
+      pushSystem(`📋 任务已创建：${ev.task.instruction}`)
+    } else if (ev.type === 'task_started') {
+      pushSystem('🚀 开始执行…')
+    } else if (ev.type === 'agent_message') {
       messages.value.push({
-        id: ev.task.id,
-        role: 'system',
-        content: `任务已创建（${ev.task.status}）：${ev.task.instruction}`,
+        id: `agent-${messages.value.length}`,
+        role: 'assistant',
+        content: ev.content,
         extra: null,
-        created_at: ev.task.created_at,
+        created_at: null,
       })
+    } else if (ev.type === 'tool_call') {
+      pushSystem(`🔧 调用工具 ${ev.name} ${JSON.stringify(ev.args).slice(0, 80)}`)
+    } else if (ev.type === 'tool_result') {
+      pushSystem(`📄 ${ev.name} 完成`)
+    } else if (ev.type === 'steering_queued') {
+      pushSystem('⏳ 补充指令已加入执行队列')
+    } else if (ev.type === 'steering_injected') {
+      pushSystem(`🔁 已在执行中注入：${ev.content}`)
+    } else if (ev.type === 'task_revising') {
+      activePreview.value = null
+      pushSystem('✏️ 按修改意见调整中…')
+    } else if (ev.type === 'preview_ready') {
+      const content = ev.preview?.preview ?? ''
+      messages.value.push({
+        id: `preview-${ev.task_id}`,
+        role: 'assistant',
+        content,
+        extra: { task_id: ev.task_id, kind: 'preview' },
+        created_at: null,
+      })
+      activePreview.value = { taskId: ev.task_id, content }
+      pushSystem('🎯 预览就绪：满意请点「满意，交付」；或直接输入修改意见')
+    } else if (ev.type === 'task_completed') {
+      activePreview.value = null
+      pushSystem('✅ 任务已交付')
+    } else if (ev.type === 'task_failed') {
+      activePreview.value = null
+      pushSystem(`❌ 任务失败：${ev.detail}`)
     } else if (ev.type === 'done') {
       if (ev.message) {
         const last = messages.value[messages.value.length - 1]
@@ -161,11 +232,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     currentSession,
     messages,
     streaming,
+    activePreview,
     refreshSessions,
     newSession,
     selectSession,
     switchMode,
     send,
     resolveRoute,
+    approvePreview,
   }
 })

@@ -110,7 +110,7 @@ LangGraph 走 `ChatOpenAI(base_url=GLM端点)`。具体 GLM 版本是配置项�
 ## Risks / Trade-offs
 
 - [HTML slides → pptx 转换保真度不足] → 降级方案：下载提供 pdf；或该类型直接用 python-pptx 生成、预览用渲染图
-- [执行中消息注入：LangGraph 不支持在长工具调用中间打断] → 消息入队，在工具循环每轮间隙检查并注入；**列为开发前 spike，第一周验证**
+- [执行中消息注入：LangGraph 不支持在长工具调用中间打断] → 消息入队，在工具循环每轮间隙检查并注入；**✅ 已验证（见下方 Spike 结论）**
 - [智能路由误判] → 卡片确认兜底，错误成本仅一次点击
 - [Agent 产物预览 XSS] → sandbox iframe + CSP + 不带主站凭证，安全评审必过项
 - [沙箱逃逸/资源滥用] → 决策 8 加固清单 + 限流 + 用量记录监控异常
@@ -125,7 +125,17 @@ LangGraph 走 `ChatOpenAI(base_url=GLM端点)`。具体 GLM 版本是配置项�
 
 ## Open Questions
 
-- GLM 具体型号与档位（GLM-4.x 稳定版 vs 最新旗舰）——实现期定
+- GLM 具体型号与档位（GLM-4.x 稳定版 vs 最新旗舰）——实现期定（当前 glm-4-plus）
 - 产物保留策略（用户产物保留多久、配额多少）——上线前定，v1 不清理
-- 智能路由的实现形态（规则优先 vs 小模型分类）——实现期 spike
-- 注册方式（邮箱/手机号/第三方登录）——实现期定，v1 邮箱+密码
+- ~~智能路由的实现形态（规则优先 vs 小模型分类）~~——已定：规则起步（G4 落地），预留模型分类接口
+- ~~注册方式~~——已取消：本模块作为宿主系统子模块，身份经可信 X-User-Id 头注入
+
+## Spike 结论（2026-09-15 验证，代码 `backend/scripts/spike_langgraph_injection.py`）
+
+**Spike 1：LangGraph 执行中消息注入（5.1）——可行，方案定型**
+
+- 图结构：`agent 节点（LLM+工具调用）⇄ tools 节点（执行工具+插话注入）→ preview 节点（interrupt）`。
+- **注入点**：`tools` 节点在所有工具执行完、返回下一轮 `agent` 之前 drain `asyncio.Queue`，把插话包装为 `HumanMessage("[用户补充指令] …")` 追加进 messages——验证输出显示下一轮 LLM 输入完整可见该消息。插话队列放在图状态外（runner 持有），避免 reducer 语义纠缠；插话同时落库为普通消息，重启恢复以 DB 为准。
+- **预览中断**：`preview` 节点内 `interrupt({"preview": 草稿})` 暂停整图；恢复用 `graph.ainvoke(Command(resume={"action": "revise"|"approve", "instruction": …}), config)`。revise → 注入 `HumanMessage("[修改要求] …")` 回到 agent 循环（新一轮 LLM 输入已验证可见）；approve → 终止，`aget_state(config).next == ()` 判定完成。
+- **版本链**：同 `thread_id` 的检查点历史即版本链（决策 6）；InMemorySaver 验证通过，生产用 AsyncPostgresSaver（同库，决策 12）。
+- **约束**：interrupt 恢复时 preview 节点从头重执行——节点内 interrupt 前不得有副作用；迭代上限（MAX_ITERATIONS）在条件边防护工具死循环。

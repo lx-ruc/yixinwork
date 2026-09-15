@@ -1,17 +1,17 @@
-"""FastAPI 公共依赖：数据库会话 + 身份上下文。
+"""FastAPI 公共依赖：数据库会话 + 身份上下文 + Agent 装配。
 
 鉴权由宿主系统负责；模块信任网关注入的 X-User-Id 头并以此做数据隔离。
 """
 
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
 from app.db import SessionLocal, get_db
-from app.llm.glm import GLMChatClient
 from app.llm import get_llm
+from app.llm.glm import GLMChatClient, get_chat_model
 
 DbSession = Annotated[Session, Depends(get_db)]
 
@@ -24,6 +24,22 @@ def get_session_factory() -> sessionmaker:
 SessionFactory = Annotated[sessionmaker, Depends(get_session_factory)]
 
 LlmClient = Annotated[GLMChatClient, Depends(get_llm)]
+
+
+def get_agent_model():
+    """Agent 工具循环用的 chat model（测试可覆盖为脚本化假模型）。"""
+    return get_chat_model()
+
+
+AgentModel = Annotated[object, Depends(get_agent_model)]
+
+
+def get_checkpointer(request: Request):
+    """LangGraph 检查点（lifespan 装配到 app.state；测试可覆盖）。"""
+    return request.app.state.checkpointer
+
+
+Checkpointer = Annotated[object, Depends(get_checkpointer)]
 
 
 def get_current_user_id(

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useWorkspaceStore, type CardEntry } from '../stores/workspace'
 import type { MessageInfo } from '../api/sessions'
@@ -30,6 +30,22 @@ async function onResolve(messageId: string, action: 'confirm' | 'decline') {
     ElMessage.error(`操作失败: ${(e as Error).message}`)
   }
 }
+
+async function onApprove() {
+  try {
+    await store.approvePreview()
+    ElMessage.success('已交付')
+  } catch (e) {
+    ElMessage.error(`交付失败: ${(e as Error).message}`)
+  }
+}
+
+const inputPlaceholder = computed(() => {
+  if (!store.currentSession) return '请先选择会话'
+  if (store.activePreview) return '输入修改意见，Enter 发送（增量修改）'
+  if (store.currentSession.mode === 'work') return '工作模式：描述任务；执行中输入即为补充指令'
+  return '输入消息，Enter 发送'
+})
 
 function cardOf(m: MessageInfo): CardEntry {
   return m as CardEntry
@@ -97,11 +113,19 @@ watch(
     </div>
 
     <footer class="chat-input">
+      <!-- 预览就绪：满意交付；修改意见直接走输入框（后端 preview_ready 分支） -->
+      <div v-if="store.activePreview" class="preview-bar">
+        <span>🎯 预览已就绪，效果如何？</span>
+        <el-button size="small" type="success" :disabled="store.streaming" @click="onApprove">
+          满意，交付
+        </el-button>
+        <span class="hint">或直接在下方输入修改意见</span>
+      </div>
       <el-input
         v-model="input"
         type="textarea"
         :rows="2"
-        :placeholder="store.currentSession ? '输入消息，Enter 发送' : '请先选择会话'"
+        :placeholder="inputPlaceholder"
         :disabled="!store.currentSession || store.streaming"
         @keydown.enter.exact.prevent="onSend"
       />
@@ -210,5 +234,22 @@ watch(
   display: flex;
   gap: 12px;
   align-items: flex-end;
+  flex-wrap: wrap;
+}
+.preview-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: var(--el-color-success-light-9);
+  border: 1px solid var(--el-color-success-light-7);
+  font-size: 13px;
+}
+.preview-bar .hint {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 </style>

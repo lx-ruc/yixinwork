@@ -33,6 +33,16 @@ export type StreamEvent =
   | { type: 'route_card'; message: MessageInfo; reason: string }
   | { type: 'mode_switched'; mode: 'chat' | 'work' }
   | { type: 'task_created'; task: TaskInfo }
+  | { type: 'task_started'; task_id: string }
+  | { type: 'agent_message'; content: string }
+  | { type: 'tool_call'; name: string; args: Record<string, unknown> }
+  | { type: 'tool_result'; name: string; content: string }
+  | { type: 'steering_queued'; task_id: string; content: string }
+  | { type: 'steering_injected'; content: string }
+  | { type: 'task_revising'; task_id: string }
+  | { type: 'preview_ready'; task_id: string; preview: { preview?: string } }
+  | { type: 'task_completed'; task_id: string; status: string }
+  | { type: 'task_failed'; task_id: string; detail: string }
   | { type: 'done'; message: MessageInfo | null; usage: unknown }
   | { type: 'error'; detail: string }
 
@@ -43,6 +53,15 @@ export const patchSession = (id: string, body: { mode?: string }) =>
   api<SessionInfo>(`/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 export const listMessages = (id: string) =>
   api<MessageInfo[]>(`/sessions/${id}/messages`)
+export const listTasks = (sessionId: string) =>
+  api<TaskInfo[]>(`/sessions/${sessionId}/tasks`)
+
+/** 预览反馈：approve=满意交付；revise 由会话消息入口承担（修改指令续跑）。 */
+export const taskFeedback = (
+  taskId: string,
+  action: 'approve',
+  onEvent: (ev: StreamEvent) => void,
+) => ssePost(`/tasks/${taskId}/feedback`, { action }, onEvent)
 
 /** POST + SSE 事件流解析（ReadableStream，事件以空行分隔）。 */
 async function ssePost(

@@ -13,9 +13,13 @@
 ```
 ├── backend/            # Python / FastAPI / LangGraph
 │   ├── app/
+│   │   ├── agent/      # LangGraph 执行图 + TaskRunner（插话注入/预览中断/反馈链）
 │   │   ├── api/        # 路由与依赖
+│   │   ├── llm/        # GLM 客户端（直答流式 / Agent 工具循环）
 │   │   ├── models/     # SQLAlchemy 模型（全部含 user_id，对外多用户）
-│   │   └── storage/    # StorageService 抽象 + 本地磁盘实现
+│   │   ├── services/   # 会话/直答/路由/工作流编排
+│   │   ├── storage/    # StorageService 抽象 + 本地磁盘实现
+│   │   └── tools/      # Agent 工具注册框架 + 内置工具
 │   ├── alembic/        # 数据库迁移
 │   └── tests/
 ├── frontend/           # Vue 3 + Element Plus + Vite

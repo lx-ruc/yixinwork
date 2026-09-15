@@ -1,7 +1,8 @@
-"""GLM 聊天客户端：OpenAI 兼容协议，流式输出。"""
+"""GLM 聊天客户端：OpenAI 兼容协议，流式输出；Agent 侧提供可绑定工具的 chat model。"""
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from functools import lru_cache
 
 from openai import OpenAI
 
@@ -59,3 +60,24 @@ def _parse_chunk(chunk) -> Iterator[ChatChunk]:
         }
     if delta or usage:
         yield ChatChunk(delta=delta, usage=usage)
+
+
+@lru_cache
+def get_chat_model():
+    """Agent 循环用的 chat model（可 bind_tools，非流式逐轮调用）。
+
+    与 GLMChatClient 同一份配置；直答走流式 SDK，Agent 工具循环走 langchain 适配。
+    """
+    from langchain_openai import ChatOpenAI
+
+    from app.config import get_settings
+
+    settings = get_settings()
+    if not settings.glm_api_key:
+        raise LLMError("GLM_API_KEY 未配置")
+    return ChatOpenAI(
+        api_key=settings.glm_api_key,
+        base_url=settings.glm_base_url,
+        model=settings.glm_model,
+        temperature=0.3,
+    )

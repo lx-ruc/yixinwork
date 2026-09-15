@@ -99,7 +99,14 @@ async def test_confirm_switches_to_work_and_creates_task(
     )
     events = _parse_sse(resp.text)
     types = [e["type"] for e in events]
-    assert types == ["mode_switched", "task_created", "done"]
+    # 确认后：切模式 → 建任务 → Agent 执行（假模型直出）→ 预览就绪
+    assert types == [
+        "mode_switched",
+        "task_created",
+        "task_started",
+        "agent_message",
+        "preview_ready",
+    ]
     assert events[0]["mode"] == "work"
     assert events[1]["task"]["status"] == "pending"
 
@@ -151,7 +158,13 @@ async def test_work_mode_message_creates_task_directly(app_client, db_sessionmak
         headers=HEADERS,
     )
     types = [e["type"] for e in _parse_sse(resp.text)]
-    # 工作模式不做路由判断：无 route_card，消息直接成为任务
-    assert types == ["user_message", "task_created", "done"]
+    # 工作模式不做路由判断：无 route_card，消息直接成为任务并执行到预览就绪
+    assert types == [
+        "user_message",
+        "task_created",
+        "task_started",
+        "agent_message",
+        "preview_ready",
+    ]
     with db_sessionmaker() as db:
-        assert db.query(Task).count() == 1
+        assert db.query(Task).one().status == "preview_ready"
