@@ -1,7 +1,7 @@
 """Agent 工具注册框架：定义 / 校验 / 调用封装。
 
 工具 = 名称 + 描述 + JSON Schema 参数 + 异步函数（入参 dict，出参文本结果）。
-LLM 侧由 graph 绑定为 OpenAI function calling 格式；G6 按此框架填充真实工具。
+LLM 侧由 graph 绑定为 OpenAI function calling 格式。
 """
 
 from dataclasses import dataclass
@@ -10,6 +10,9 @@ from typing import Any, Awaitable, Callable
 import jsonschema
 
 ToolFunc = Callable[[dict[str, Any]], Awaitable[str]]
+
+# 测试钩子：拦截任意工具执行（如挂起等待执行中插话入队的时序门控）；生产恒为 None
+EXECUTE_HOOK: Callable[[str, dict[str, Any]], Awaitable[str]] | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,8 @@ class ToolRegistry:
             jsonschema.validate(args, spec.parameters)
         except jsonschema.ValidationError as exc:
             raise ToolError(f"参数校验失败: {exc.message}") from exc
+        if EXECUTE_HOOK is not None:
+            return await EXECUTE_HOOK(name, args)
         try:
             return await spec.func(args)
         except ToolError:

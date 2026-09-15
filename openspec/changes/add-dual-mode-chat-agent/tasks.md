@@ -42,11 +42,11 @@
 
 ## 6. 可信工具层（agent-task-execution）
 
-- [ ] 6.1 工具注册框架（Agent 可调用工具的定义/校验/调用封装）
-- [ ] 6.2 文档工具：Markdown 中间格式生成与预览渲染数据
-- [ ] 6.3 海报工具：HTML 模板生成 + playwright 渲染 png
-- [ ] 6.4 表格工具：HTML 表格预览数据 + openpyxl 生成 xlsx
-- [ ] 6.5 幻灯片工具：HTML slides 预览 + pptx/pdf 转换（含保真度降级路径）
+- [x] 6.1 工具注册框架（Agent 可调用工具的定义/校验/调用封装）
+- [x] 6.2 文档工具：Markdown 中间格式生成与预览渲染数据
+- [x] 6.3 海报工具：HTML 模板生成 + playwright 渲染 png
+- [x] 6.4 表格工具：HTML 表格预览数据 + openpyxl 生成 xlsx
+- [x] 6.5 幻灯片工具：HTML slides 预览 + pptx/pdf 转换（含保真度降级路径）
 
 ## 7. 代码沙箱（code-sandbox）
 

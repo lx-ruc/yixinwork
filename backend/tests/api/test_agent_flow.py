@@ -42,8 +42,11 @@ async def test_tool_loop_events_and_preview(app_client, db_sessionmaker):
                         content="",
                         tool_calls=[
                             {
-                                "name": "write_document_draft",
-                                "args": {"topic": "Q3销售"},
+                                "name": "save_document",
+                                "args": {
+                                    "title": "Q3销售报告",
+                                    "content_md": "## 概况\n三季度销售额环比增长。",
+                                },
                                 "id": "c1",
                             }
                         ],
@@ -67,7 +70,9 @@ async def test_tool_loop_events_and_preview(app_client, db_sessionmaker):
     assert "tool_call" in types and "tool_result" in types
     assert types[-1] == "preview_ready"
     tool_call = next(e for e in events if e["type"] == "tool_call")
-    assert tool_call["name"] == "write_document_draft"
+    assert tool_call["name"] == "save_document"
+    tool_result = next(e for e in events if e["type"] == "tool_result")
+    assert "document.md" in tool_result["content"]
 
     # 任务状态落到预览就绪；里程碑助手消息已持久化
     with db_sessionmaker() as db:
@@ -77,8 +82,9 @@ async def test_tool_loop_events_and_preview(app_client, db_sessionmaker):
     kinds = [m["extra"]["kind"] for m in msgs if m["extra"]]
     assert "preview" in kinds
 
-    # LLM 第二轮输入包含工具结果
+    # LLM 第二轮输入包含工具结果；每轮均前置系统提示（工具使用规范）
     assert any(m.type == "tool" for m in model.calls[1])
+    assert model.calls[0][0].type == "system"
 
 
 async def test_steering_injected_during_run(app_client):
@@ -92,8 +98,8 @@ async def test_steering_injected_during_run(app_client):
                         content="",
                         tool_calls=[
                             {
-                                "name": "write_document_draft",
-                                "args": {"topic": "海报"},
+                                "name": "save_poster",
+                                "args": {"title": "双11海报", "slogan": "全场五折"},
                                 "id": "c1",
                             }
                         ],
@@ -214,23 +220,23 @@ async def test_feedback_cross_user_404(app_client):
 
 
 class _SteerGate:
-    """经 builtin 测试钩子让工具执行挂起，等插话入队后放行（复刻执行中时序）。"""
+    """经注册表测试钩子让工具执行挂起，等插话入队后放行（复刻执行中时序）。"""
 
     def __init__(self):
         import asyncio
 
-        from app.tools import builtin
+        from app.tools import base
 
         self.release = asyncio.Event()
         self.running = asyncio.Event()
-        builtin.DRAFT_HOOK = self._gated
+        base.EXECUTE_HOOK = self._gated
 
-    async def _gated(self, args: dict) -> str:
+    async def _gated(self, name: str, args: dict) -> str:
         self.running.set()
         await self.release.wait()
-        return f"草稿已写出（{args['topic']}）"
+        return f"{name} 已执行（{args.get('title', '')}）"
 
     def close(self):
-        from app.tools import builtin
+        from app.tools import base
 
-        builtin.DRAFT_HOOK = None
+        base.EXECUTE_HOOK = None

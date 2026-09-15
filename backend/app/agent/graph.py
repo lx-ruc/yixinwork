@@ -7,7 +7,7 @@ import asyncio
 import operator
 from typing import Annotated, Any, TypedDict
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
@@ -16,6 +16,14 @@ from app.tools.base import ToolError, ToolRegistry
 MAX_ITERATIONS = 12  # 工具循环轮数上限（防死循环）
 STEERING_PREFIX = "[用户补充指令] "
 REVISION_PREFIX = "[修改要求] "
+
+SYSTEM_PROMPT = """你是「亿心工作」工作模式的执行智能体，负责完成用户的交付类任务（文档/海报/表格/幻灯片等）。
+执行要求：
+1. 产出必须通过工具保存，不要只在回复文字里给内容：
+   - 文档 → save_document；海报 → save_poster；表格 → save_table；幻灯片 → save_slides。
+2. 内容质量优先：结构完整、信息具体，不写占位文字。
+3. 收到以 [修改要求] 或 [用户补充指令] 开头的消息时，按其调整后重新保存（会形成新版本）。
+4. 工具保存完成后，用一两句话说明产出了什么即可，不必复述全部内容。"""
 
 
 class AgentState(TypedDict):
@@ -28,10 +36,11 @@ def _concat(current: list, update: list) -> list:
 
 
 def build_agent_graph(*, llm, registry: ToolRegistry, inbox: asyncio.Queue, checkpointer):
-    """llm: 已 bind_tools 的 chat model；inbox: 执行中插话队列（runner 持有）。"""
-
+    """llm: chat model（此处统一 bind_tools）；inbox: 执行中插话队列（runner 持有）。"""
+    llm = llm.bind_tools(registry.openai_schemas())
     async def agent_node(state: AgentState) -> dict:
-        ai = await llm.ainvoke(state["messages"])
+        # 系统提示不入 state（每次调用前置；检查点保持纯对话史）
+        ai = await llm.ainvoke([SystemMessage(content=SYSTEM_PROMPT), *state["messages"]])
         return {"messages": [ai], "iterations": 1}
 
     async def tools_node(state: AgentState) -> dict:

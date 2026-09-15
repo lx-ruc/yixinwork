@@ -19,6 +19,20 @@ def storage(tmp_path):
     return LocalDiskStorage(tmp_path / "artifacts")
 
 
+@pytest.fixture(autouse=True)
+def _tmp_storage(tmp_path, monkeypatch):
+    """产物落盘指向 tmp：runner 内部经 get_storage() 单例写入，不污染工作目录。"""
+    from app.config import get_settings
+    from app.storage import get_storage
+
+    monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "artifacts"))
+    get_settings.cache_clear()
+    get_storage.cache_clear()
+    yield
+    get_settings.cache_clear()
+    get_storage.cache_clear()
+
+
 @pytest.fixture
 def db_engine():
     engine = create_engine(

@@ -21,7 +21,9 @@ from app.models import (
     TASK_RUNNING,
     Task,
 )
+from app.storage import get_storage
 from app.tools.base import ToolRegistry
+from app.tools.context import ToolContext, set_tool_context
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,10 @@ class TaskRunner:
         self._db_factory = db_factory
         self._session_id = session_id
         self._user_id = user_id
+        # 产物工具落盘上下文（版本号跨 start/resume 连续 → v1/v2/… 版本链）
+        self._tool_ctx = ToolContext(
+            user_id=user_id, task_id=task_id, storage=get_storage()
+        )
 
     def steer(self, content: str) -> None:
         """执行中插话入队（tools 节点循环间隙取出注入）。"""
@@ -71,6 +77,7 @@ class TaskRunner:
         return self._stream(Command(resume=payload))
 
     async def _stream(self, graph_input) -> AsyncIterator[dict]:
+        set_tool_context(self._tool_ctx)  # 工具经 ContextVar 拿到 user/task/版本
         await self._set_status(TASK_RUNNING)
         yield {"type": "task_started", "task_id": self.task_id}
         try:
