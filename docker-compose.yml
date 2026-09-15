@@ -1,0 +1,25 @@
+name: yixin-agent
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: yixin-agent-postgres
+    environment:
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: agent
+      POSTGRES_DB: agent_platform
+    ports:
+      # 宿主 5433：避开本机已占用的 5432（Homebrew PostgreSQL）
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent_platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # backend / frontend / sandbox-runner 服务在实现推进后逐步加入（见 tasks.md 组 7/10）
+
+volumes:
+  pgdata:
