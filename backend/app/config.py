@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     )
     storage_root: str = "./data/artifacts"
 
+    # 代码沙箱（模型生成代码的 Docker 隔离执行）
+    sandbox_image: str = "yixin-sandbox:latest"
+    sandbox_timeout_seconds: int = 60
+    sandbox_memory: str = "512m"
+    sandbox_cpus: float = 1.0
+    sandbox_max_output_mb: int = 20
+
     # GLM（OpenAI 兼容协议）
     glm_api_key: str = ""
     glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
