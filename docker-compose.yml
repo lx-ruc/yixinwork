@@ -40,7 +40,9 @@ services:
       - path: ./backend/.env
         required: false
     ports:
-      - "8001:8001"
+      # 宿主 8002：8001 留给本机开发进程（uvicorn --reload / vite 代理指向 localhost:8001）
+      # 容器网络内前端仍走 backend:8001，不受此映射影响
+      - "8002:8001"
     volumes:
       - artifacts:/app/data
       # 沙箱执行：经宿主 Docker daemon 创建一次性容器

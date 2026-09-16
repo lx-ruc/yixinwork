@@ -11,16 +11,33 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.llm.glm import ChatChunk, LLMError
-from app.models import ChatSession, Message, ROLE_ASSISTANT, ROLE_USER
+from app.models import (
+    DEFAULT_TITLE,
+    ChatSession,
+    Message,
+    ROLE_ASSISTANT,
+    ROLE_USER,
+)
 from app.services.routing import RouteDecision, get_classifier
 from app.services.usage_service import record_llm_call
 
 HISTORY_WINDOW = 20  # 送入 LLM 的最近消息条数
 
+AUTO_TITLE_MAX = 18  # 自动标题截断长度（侧栏单行可读）
+
+
+def auto_title(content: str) -> str:
+    """按首条用户消息生成会话标题：压空白 + 截断，不用 LLM（零成本、即时）。"""
+    text = " ".join(content.split())
+    if len(text) <= AUTO_TITLE_MAX:
+        return text or DEFAULT_TITLE
+    return text[:AUTO_TITLE_MAX] + "…"
+
 SYSTEM_PROMPT = (
     "你是亿心智能体助手，回答简洁、准确、友好。"
     "当用户的请求看起来是一项具体工作（如制作文档/表格/PPT/海报、数据处理）时，"
     "提示用户可以切换到工作模式让智能体代为完成。"
+    "思考过程与回复都使用中文。"
 )
 
 MsgFactory = sessionmaker
@@ -132,13 +149,21 @@ def _answer_stream(
     messages: list[dict],
     db_factory: sessionmaker,
 ) -> Iterator[dict]:
-    """LLM 流式调用 + 助手消息持久化 + llm_call 用量埋点（user_message 由调用方负责）。"""
+    """LLM 流式调用 + 助手消息持久化 + llm_call 用量埋点（user_message 由调用方负责）。
+
+    思考分片（reasoning）先于正文下发 reasoning_delta；全文随助手消息
+    存入 extra.reasoning（历史回放时前端可折叠展示）。
+    """
     accumulated: list[str] = []
+    reasoning_acc: list[str] = []
     usage: dict | None = None
     started = time.monotonic()
     try:
         chunk: ChatChunk
         for chunk in llm.stream_chat(messages):
+            if chunk.reasoning:
+                reasoning_acc.append(chunk.reasoning)
+                yield {"type": "reasoning_delta", "content": chunk.reasoning}
             if chunk.delta:
                 accumulated.append(chunk.delta)
                 yield {"type": "delta", "content": chunk.delta}
@@ -166,7 +191,8 @@ def _answer_stream(
         duration_ms=int((time.monotonic() - started) * 1000),
     )
     full = "".join(accumulated)
-    assistant_msg = persist_message(db, session, user_id, ROLE_ASSISTANT, full)
+    extra = {"reasoning": "".join(reasoning_acc)} if reasoning_acc else None
+    assistant_msg = persist_message(db, session, user_id, ROLE_ASSISTANT, full, extra=extra)
     yield {
         "type": "done",
         "message": message_dict(assistant_msg),
@@ -193,6 +219,9 @@ def persist_message(
     content: str,
     extra: dict | None = None,
 ) -> Message:
+    # 会话仍持占位标题时，首条用户消息按内容改写（与消息同事务提交）
+    if role == ROLE_USER and session.title == DEFAULT_TITLE:
+        session.title = auto_title(content)
     msg = Message(
         session_id=session.id,
         user_id=user_id,

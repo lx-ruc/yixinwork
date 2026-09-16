@@ -122,11 +122,23 @@ def download(token: str, request: Request) -> Response:
         raise HTTPException(status_code=404, detail="文件不存在或已清理") from None
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     media_type = MIME_TYPES.get(ext, "application/octet-stream")
+    # 双文件名：现代浏览器取 filename*（中文原名），不认 RFC 5987 的
+    # 老浏览器/下载器回退 ASCII filename（至少保住正确扩展名，不会存成 URL 末段）
     return Response(
         content=data,
         media_type=media_type,
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{_quote(filename)}"},
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{_ascii_fallback(filename)}"; '
+                f"filename*=UTF-8''{_quote(filename)}"
+            )
+        },
     )
+
+
+def _ascii_fallback(filename: str) -> str:
+    ext = filename.rsplit(".", 1)[-1] if "." in filename else "bin"
+    return f"yixin-work.{ext}"
 
 
 def _quote(name: str) -> str:

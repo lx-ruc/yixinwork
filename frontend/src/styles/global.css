@@ -1,3 +1,34 @@
+/*
+ * 亿心工作 · 红白设计令牌
+ * 红 = 印章朱砂:定稿/交付/用户语义;其余保持纸白,让红保持分量。
+ */
+:root {
+  /* 品牌 */
+  --yx-red: #c9252d;
+  --yx-red-deep: #a11e24;
+  --yx-red-wash: #faedee;
+  --yx-red-border: #f0c6c9;
+  /* 中性(暖灰,配纸面) */
+  --yx-ink: #26262a;
+  --yx-ink-2: #6f6e6a;
+  --yx-ink-3: #a3a19b;
+  --yx-paper: #f7f6f3;
+  --yx-stage: #ececea;
+  --yx-line: #e7e5e0;
+  --yx-line-soft: #efede8;
+  --yx-serif: 'Songti SC', 'STSong', 'Noto Serif SC', 'SimSun', serif;
+
+  /* Element Plus 主色接管(与令牌同步) */
+  --el-color-primary: #c9252d;
+  --el-color-primary-light-3: #d5666c;
+  --el-color-primary-light-5: #e49296;
+  --el-color-primary-light-7: #efbdc0;
+  --el-color-primary-light-8: #f4d3d8;
+  --el-color-primary-light-9: #faedee;
+  --el-color-primary-dark-2: #a11e24;
+  --el-border-radius-base: 6px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -8,7 +39,39 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
+  color: var(--yx-ink);
+  background: #fff;
   font-family:
-    'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB',
-    'Microsoft YaHei', Arial, sans-serif;
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Helvetica Neue', Arial, sans-serif;
+}
+
+::selection {
+  background: var(--yx-red-wash);
+  color: var(--yx-red-deep);
+}
+
+/* 细滚动条(画台/对话流内使用) */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #d8d6d1;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #c3c1bb;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--yx-red);
+  outline-offset: 2px;
+}
+
+button {
+  font-family: inherit;
 }

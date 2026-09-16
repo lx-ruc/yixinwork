@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models import MODE_CHAT, SESSION_MODES
+from app.models import DEFAULT_TITLE, MODE_CHAT, SESSION_MODES
 
 
 def validate_mode(mode: str) -> str:
@@ -14,7 +14,7 @@ def validate_mode(mode: str) -> str:
 
 
 class SessionCreate(BaseModel):
-    title: str = Field(default="新会话", max_length=128)
+    title: str = Field(default=DEFAULT_TITLE, max_length=128)
     mode: str = Field(default=MODE_CHAT)
 
     @field_validator("mode")

@@ -15,6 +15,7 @@ from app.models.artifact import (
     ArtifactVersion,
 )
 from app.models.chat import (
+    DEFAULT_TITLE,
     MODE_CHAT,
     MODE_WORK,
     ROLE_ASSISTANT,
@@ -49,6 +50,7 @@ __all__ = [
     "ROLE_USER",
     "ROLE_ASSISTANT",
     "ROLE_SYSTEM",
+    "DEFAULT_TITLE",
     "TASK_PENDING",
     "TASK_RUNNING",
     "TASK_PREVIEW_READY",

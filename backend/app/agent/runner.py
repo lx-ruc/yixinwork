@@ -1,7 +1,7 @@
 """任务执行器：驱动 LangGraph 图 → SSE 事件流 + 任务状态机持久化。
 
 事件类型（SSE data）：
-  task_started / agent_message / tool_call / tool_result /
+  task_started / agent_message / tool_call / tool_result / reasoning_delta /
   steering_injected / preview_ready / task_completed / task_failed
 """
 
@@ -160,9 +160,17 @@ class TaskRunner:
         await self._set_status(TASK_RUNNING)
         yield {"type": "task_started", "task_id": self.task_id}
         try:
-            async for update in self._graph.astream(
-                graph_input, self._config, stream_mode="updates"
+            # updates: 节点级事件；custom: agent 节点内实时推送的思考分片
+            async for mode, update in self._graph.astream(
+                graph_input, self._config, stream_mode=["updates", "custom"]
             ):
+                if mode == "custom":
+                    reasoning = (
+                        update.get("reasoning") if isinstance(update, dict) else None
+                    )
+                    if reasoning:
+                        yield {"type": "reasoning_delta", "content": reasoning}
+                    continue
                 for event in self._translate(update):
                     yield event
             snapshot = await self._graph.aget_state(self._config)

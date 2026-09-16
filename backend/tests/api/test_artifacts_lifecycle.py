@@ -96,6 +96,10 @@ async def test_version_chain_preview_download_flow(app_client):
         "application/vnd.openxmlformats-officedocument.wordprocessingml"
     )
     assert file_resp.content[:2] == b"PK"  # docx = zip 包
+    # 双文件名：现代浏览器取 filename*（原名），老浏览器回退 ASCII（保扩展名）
+    disp = file_resp.headers["content-disposition"]
+    assert 'filename="yixin-work.docx"' in disp
+    assert "filename*=UTF-8''" in disp
 
     # 满意交付（终态）后重复反馈 409
     approve = await app_client.post(

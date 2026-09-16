@@ -8,7 +8,14 @@ import operator
 import time
 from typing import Annotated, Any, Callable, Coroutine, TypedDict
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
@@ -19,6 +26,7 @@ STEERING_PREFIX = "[用户补充指令] "
 REVISION_PREFIX = "[修改要求] "
 
 SYSTEM_PROMPT = """你是「亿心工作」工作模式的执行智能体，负责完成用户的交付类任务（文档/海报/表格/幻灯片等）。
+重要：思考过程（推理内容）与最终回复都必须使用中文，引用的专有名词、代码、数据可保留英文。
 执行要求：
 1. 产出必须通过工具保存，不要只在回复文字里给内容：
    - 文档 → save_document；海报 → save_poster；表格 → save_table；幻灯片 → save_slides
@@ -30,6 +38,14 @@ SYSTEM_PROMPT = """你是「亿心工作」工作模式的执行智能体，负�
 
 def _concat(current: list, update: list) -> list:
     return [*current, *update]
+
+
+def _stream_writer():
+    """LangGraph 自定义流写入口；脱离图执行上下文（如单测直调节点）时返回 None。"""
+    try:
+        return get_stream_writer()
+    except RuntimeError:
+        return None
 
 
 class AgentState(TypedDict):
@@ -57,8 +73,26 @@ def build_agent_graph(
     system_prompt = SYSTEM_PROMPT if not system_prompt_extra else f"{SYSTEM_PROMPT}\n\n{system_prompt_extra}"
     async def agent_node(state: AgentState) -> dict:
         started = time.monotonic()
-        # 系统提示不入 state（每次调用前置；检查点保持纯对话史）
-        ai = await llm.ainvoke([SystemMessage(content=system_prompt), *state["messages"]])
+        writer = _stream_writer()
+        # 流式聚合调用：GLM 思考只存在于流式分片，逐片经 writer 推给前端实时展示
+        final = AIMessageChunk(content="")
+        async for chunk in llm.astream(
+            [SystemMessage(content=system_prompt), *state["messages"]]
+        ):
+            final = final + chunk
+            reasoning = (chunk.additional_kwargs or {}).get("reasoning_content")
+            if reasoning and writer:
+                writer({"reasoning": reasoning})
+        # 聚合结果转普通 AIMessage 入 state（检查点序列化保持与原先一致）
+        ai = AIMessage(
+            content=final.content,
+            tool_calls=final.tool_calls,
+            invalid_tool_calls=final.invalid_tool_calls,
+            additional_kwargs=final.additional_kwargs,
+            response_metadata=final.response_metadata,
+            usage_metadata=final.usage_metadata,
+            id=final.id,
+        )
         if on_llm_usage is not None:
             await on_llm_usage(ai, int((time.monotonic() - started) * 1000))
         return {"messages": [ai], "iterations": 1}

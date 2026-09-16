@@ -17,6 +17,8 @@ SESSION_MODES = (MODE_CHAT, MODE_WORK)
 ROLE_USER = "user"
 ROLE_ASSISTANT = "assistant"
 ROLE_SYSTEM = "system"
+
+DEFAULT_TITLE = "新会话"  # 占位标题：首条用户消息落库时按内容改写
 MESSAGE_ROLES = (ROLE_USER, ROLE_ASSISTANT, ROLE_SYSTEM)
 
 
@@ -25,7 +27,7 @@ class ChatSession(UUIDMixin, TimestampMixin, Base):
 
     # 身份由宿主系统注入（可信头），模块不拥有用户表，故无外键
     user_id: Mapped[str] = mapped_column(String(36), index=True, nullable=False)
-    title: Mapped[str] = mapped_column(String(128), nullable=False, default="新会话")
+    title: Mapped[str] = mapped_column(String(128), nullable=False, default=DEFAULT_TITLE)
     mode: Mapped[str] = mapped_column(String(8), nullable=False, default=MODE_CHAT)
 
 

@@ -29,6 +29,7 @@ export interface TaskInfo {
 
 export type StreamEvent =
   | { type: 'user_message'; message: MessageInfo }
+  | { type: 'reasoning_delta'; content: string }
   | { type: 'delta'; content: string }
   | { type: 'route_card'; message: MessageInfo; reason: string }
   | { type: 'mode_switched'; mode: 'chat' | 'work' }

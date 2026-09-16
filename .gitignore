@@ -19,3 +19,7 @@ backend/data/
 .vscode/
 .DS_Store
 .playwright-mcp/
+redesign-2.png
+sse-4inv.sse
+*.sse
+redesign-*.png

@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from sqlalchemy import select
 
 from app.api.deps import CurrentUserId, DbSession
-from app.models import ChatSession, Message
+from app.models import DEFAULT_TITLE, ChatSession, Message
 from app.schemas.chat import MessageOut
 from app.schemas.session import SessionCreate, SessionModeUpdate, SessionOut
 from app.services.session_service import get_owned_session
@@ -17,7 +17,7 @@ def create_session(
     payload: SessionCreate, user: CurrentUserId, db: DbSession
 ) -> ChatSession:
     session = ChatSession(
-        user_id=user, title=payload.title.strip() or "新会话", mode=payload.mode
+        user_id=user, title=payload.title.strip() or DEFAULT_TITLE, mode=payload.mode
     )
     db.add(session)
     db.commit()

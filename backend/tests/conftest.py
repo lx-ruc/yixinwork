@@ -3,7 +3,7 @@
 import httpx
 import pytest
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -126,6 +126,17 @@ class FakeAgentModel(GenericFakeChatModel):
     async def ainvoke(self, messages, *a, **kw):  # type: ignore[override]
         self._calls.append(list(messages))
         return await super().ainvoke(messages, *a, **kw)
+
+    async def astream(self, messages, *a, **kw):  # type: ignore[override]
+        """graph 侧流式取推理：整条消息作为单分片回放（含 tool_calls/额外字段）。
+
+        GenericFakeChatModel 基类的流式对空内容消息（纯 tool_calls）零分片报错，
+        故覆写为整条下发；分片聚合在 graph.agent_node 完成。
+        """
+        self._calls.append(list(messages))
+        result = self._generate(list(messages))
+        msg = result.generations[0].message
+        yield AIMessageChunk(**msg.model_dump(exclude={"type"}))
 
 
 @pytest.fixture
