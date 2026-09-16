@@ -108,6 +108,23 @@ async def stream_work_message(
         user_msg = persist_message(db, session, user_id, ROLE_USER, content)
         yield {"type": "user_message", "message": message_dict(user_msg)}
 
+    # 卡死自愈：任务非终态/非预览态，但进程内没有执行器（如断连残留的
+    # running 任务）→ 落失败终态，本条消息按新任务处理，而不是永远报
+    # "任务执行器不可用"。
+    if (
+        latest_info is not None
+        and latest_info["status"] not in TERMINAL_STATUSES
+        and latest_info["status"] != TASK_PREVIEW_READY
+        and runner_registry.get(latest_info["id"]) is None
+    ):
+        _fail_orphan_task(db_factory, latest_info["id"])
+        yield {
+            "type": "task_broken",
+            "task_id": latest_info["id"],
+            "detail": "上一任务已中断并自动结束，本条消息按新任务处理",
+        }
+        latest_info = None
+
     if latest_info is None or latest_info["status"] in TERMINAL_STATUSES:
         new_task = _create_task(db_factory, session_id, user_id, instruction=content)
         yield {"type": "task_created", "task": new_task}
@@ -126,7 +143,7 @@ async def stream_work_message(
 
     if latest_info["status"] == TASK_RUNNING:
         runner = runner_registry.get(latest_info["id"])
-        if runner is None:  # 进程内 runner 丢失（重启场景已由启动恢复标失败）
+        if runner is None:  # 上面自愈未覆盖的窗口（自查时仍在执行）：明确报错而非闷头入队
             yield {"type": "error", "detail": "任务执行器不可用，请稍后重试"}
             return
         runner.steer(content)
@@ -202,6 +219,17 @@ async def stream_task_feedback(
     )
     async for event in runner.resume(action, instruction=instruction):
         yield event
+
+
+def _fail_orphan_task(db_factory: sessionmaker, task_id: str) -> None:
+    """把无执行器的残留任务（running/pending）标为失败终态，解除会话卡死。"""
+    with db_factory() as db:
+        task = db.get(Task, task_id)
+        if task is None or task.status in TERMINAL_STATUSES + (TASK_PREVIEW_READY,):
+            return
+        task.status = TASK_FAILED
+        task.error = "任务中断（执行器丢失），已自动结束"
+        db.commit()
 
 
 def _create_task(

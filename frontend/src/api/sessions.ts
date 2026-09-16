@@ -44,6 +44,7 @@ export type StreamEvent =
   | { type: 'preview_ready'; task_id: string; preview: { preview?: string } }
   | { type: 'task_completed'; task_id: string; status: string }
   | { type: 'task_failed'; task_id: string; detail: string }
+  | { type: 'task_broken'; task_id: string; detail: string }
   | { type: 'done'; message: MessageInfo | null; usage: unknown }
   | { type: 'error'; detail: string }
 

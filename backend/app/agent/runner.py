@@ -19,6 +19,7 @@ from app.skills import skills_hint
 from app.models import (
     TASK_DELIVERED,
     TASK_FAILED,
+    TASK_PENDING,
     TASK_PREVIEW_READY,
     TASK_RUNNING,
     Task,
@@ -157,9 +158,9 @@ class TaskRunner:
         self._run_counts = _zero_counts()
         terminal: str | None = None
         started = time.monotonic()
-        await self._set_status(TASK_RUNNING)
-        yield {"type": "task_started", "task_id": self.task_id}
         try:
+            await self._set_status(TASK_RUNNING)
+            yield {"type": "task_started", "task_id": self.task_id}
             # updates: 节点级事件；custom: agent 节点内实时推送的思考分片
             async for mode, update in self._graph.astream(
                 graph_input, self._config, stream_mode=["updates", "custom"]
@@ -187,6 +188,12 @@ class TaskRunner:
             await self._finalize_artifacts()
             await self._persist_milestone("任务已交付 ✅", kind="delivered")
             yield {"type": "task_completed", "task_id": self.task_id, "status": TASK_DELIVERED}
+        except (asyncio.CancelledError, GeneratorExit):
+            # 客户端断开 / 流被关闭：两者是 BaseException，except Exception 接不住；
+            # 若不落终态，finally 已把 runner 移出注册表而库里任务永远停在
+            # running —— 之后该会话每条消息都误报"任务执行器不可用"。
+            self._mark_interrupted()
+            raise
         except Exception as exc:  # noqa: BLE001 统一转失败事件，不让 SSE 半途崩掉
             logger.exception("task %s failed", self.task_id)
             terminal = TASK_FAILED
@@ -198,6 +205,19 @@ class TaskRunner:
                 terminal, int((time.monotonic() - started) * 1000)
             )
             runner_registry.remove(self.task_id)  # 终态/挂起均移除；反馈时按需重建
+
+    def _mark_interrupted(self, detail: str = "连接中断，任务已停止；请重新发起") -> None:
+        """流被取消时同步落终态（禁止 await，CancelledError/GeneratorExit 下要能安全跑完）。"""
+        try:
+            with self._db_factory() as db:
+                task = db.get(Task, self.task_id)
+                if task is None or task.status not in (TASK_PENDING, TASK_RUNNING):
+                    return  # 已到终态/预览态，不覆盖
+                task.status = TASK_FAILED
+                task.error = detail
+                db.commit()
+        except Exception:  # noqa: BLE001 清理旁路，不影响异常传播
+            logger.warning("标记中断任务失败 task=%s", self.task_id, exc_info=True)
 
     async def _finish_run_stats(self, terminal: str | None, elapsed_ms: int) -> None:
         """本轮统计累进 Task.stats；终态（交付/失败）再落一条 task_stats 用量事件。"""

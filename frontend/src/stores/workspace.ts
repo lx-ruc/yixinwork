@@ -312,6 +312,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } else if (ev.type === 'task_failed') {
       activePreview.value = null
       pushSystem(`❌ 任务失败：${ev.detail}`)
+    } else if (ev.type === 'task_broken') {
+      pushSystem(`⚠️ ${ev.detail}`)
     } else if (ev.type === 'error') {
       pushSystem(`⚠️ 出错了：${ev.detail}`)
     } else if (ev.type === 'done') {
