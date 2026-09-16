@@ -24,6 +24,19 @@ function renderMd(text: string): string {
   return DOMPurify.sanitize(marked.parse(text, { async: false }) as string)
 }
 
+/**
+ * 回车发送、Shift+回车换行。
+ * 中文输入法按回车确认拼音/候选词时 keydown 也是 Enter,必须放行给输入法,
+ * 否则"输入 PPT 敲回车"会把未上屏的字母直接提交(isComposing / 229 判定)。
+ */
+function onInputKeydown(e: KeyboardEvent): void {
+  if (e.key !== 'Enter') return
+  if (e.isComposing || e.keyCode === 229) return
+  if (e.shiftKey) return
+  e.preventDefault()
+  void onSend()
+}
+
 async function onSend() {
   const content = input.value.trim()
   if (!content || store.streaming) return
@@ -232,7 +245,7 @@ watch(
           resize="none"
           :placeholder="inputPlaceholder"
           :disabled="!store.currentSession || store.streaming"
-          @keydown.enter.exact.prevent="onSend"
+          @keydown="onInputKeydown"
         />
         <el-button
           type="primary"
