@@ -6,6 +6,7 @@ from app.tools.artifacts import register_artifact_tools
 from app.tools.base import ToolError, ToolRegistry, ToolSpec
 from app.tools.code import register_code_tools
 from app.tools.context import ToolContext, get_tool_context, set_tool_context
+from app.tools.skill_tool import register_skill_tools
 
 
 @lru_cache
@@ -13,6 +14,7 @@ def get_tool_registry() -> ToolRegistry:
     registry = ToolRegistry()
     register_artifact_tools(registry)
     register_code_tools(registry)
+    register_skill_tools(registry)
     return registry
 
 

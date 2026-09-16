@@ -14,6 +14,7 @@ from html import escape
 from app.storage.base import artifact_key
 from app.tools.base import ToolRegistry, ToolSpec, ToolError
 from app.tools.context import get_tool_context
+from app.tools.slides import DEFAULT_THEME, resolve_theme_name
 
 MAX_CONTENT_BYTES = 200_000  # 单产物内容上限（防滥用）
 
@@ -204,19 +205,7 @@ async def _save_table(args: dict) -> str:
     )
 
 
-SLIDE_HTML_TEMPLATE = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>{title}</title>
-<style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:"PingFang SC","Microsoft YaHei",sans-serif;background:#202124;color:#f5f5f5}}
-.slide{{width:960px;height:540px;padding:70px 80px;display:flex;flex-direction:column;
-        justify-content:center;page-break-after:always;border-bottom:1px solid #3c4043}}
-.slide h2{{font-size:40px;margin-bottom:30px}}
-.slide li{{font-size:24px;line-height:1.8;margin-left:34px}}
-</style></head><body>
-{slides}
-</body></html>
-"""
+SLIDE_THEMES = "midnight|teal|forest|coral|charcoal|berry"
 
 
 async def _save_slides(args: dict) -> str:
@@ -224,24 +213,19 @@ async def _save_slides(args: dict) -> str:
     slides = args["slides"]
     if not slides:
         raise ToolError("至少需要一页幻灯片")
-
-    parts = []
-    for s in slides:
-        items = "".join(f"<li>{escape(str(b))}</li>" for b in s.get("bullets", []))
-        parts.append(f"<div class='slide'><h2>{escape(s['title'])}</h2><ul>{items}</ul></div>")
+    theme = args.get("theme") or DEFAULT_THEME
     from app.tools.context import get_tool_context
+    from app.tools.slides import build_slides_html, build_slides_pptx
 
     v = get_tool_context().next_version()
-    html_key = _save_at(
-        v, "slides.html", SLIDE_HTML_TEMPLATE.format(title=escape(title), slides="".join(parts))
-    )
+    html_key = _save_at(v, "slides.html", build_slides_html(title, slides, theme))
 
     pptx_key = ""
     try:
-        pptx_key = _save_at(v, "slides.pptx", _pptx_bytes(title, slides))
+        pptx_key = _save_at(v, "slides.pptx", build_slides_pptx(title, slides, theme))
     except Exception:
         pass  # pptx 转换为尽力而为；HTML 预览为主格式（保真度降级路径）
-    note = f"幻灯片《{title}》（{len(slides)} 页）已保存"
+    note = f"幻灯片《{title}》（主题 {resolve_theme_name(theme)}，{len(slides)} 页）已保存"
     if pptx_key:
         note += f"；pptx={pptx_key}"
     _record(
@@ -252,33 +236,6 @@ async def _save_slides(args: dict) -> str:
         {"title": title, "slides": slides},
     )
     return json.dumps({"saved": [{"kind": "slides", "key": html_key}], "note": note}, ensure_ascii=False)
-
-
-def _pptx_bytes(title: str, slides: list[dict]) -> bytes:
-    from pptx import Presentation
-    from pptx.util import Pt
-
-    prs = Presentation()
-    prs.slide_width = 9144000  # 16:9
-    prs.slide_height = 5143500
-    blank = prs.slide_layouts[6]
-    for s in slides:
-        slide = prs.slides.add_slide(blank)
-        tb = slide.shapes.add_textbox(457200, 457200, 8229600, 4226560)
-        tf = tb.text_frame
-        tf.word_wrap = True
-        p = tf.paragraphs[0]
-        p.text = s["title"]
-        p.font.size = Pt(32)
-        for b in s.get("bullets", []):
-            bp = tf.add_paragraph()
-            bp.text = f"• {b}"
-            bp.font.size = Pt(20)
-    import io
-
-    buf = io.BytesIO()
-    prs.save(buf)
-    return buf.getvalue()
 
 
 def register_artifact_tools(registry: ToolRegistry) -> None:
@@ -337,17 +294,29 @@ def register_artifact_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolSpec(
             name="save_slides",
-            description="保存幻灯片产物（HTML 预览 + pptx）。slides 每页 {title, bullets[]}",
+            description=(
+                "保存幻灯片产物（HTML 预览 + pptx）。"
+                f"theme 按内容气质选：{SLIDE_THEMES}；"
+                "slides 每页 {title, bullets[], layout?, subtitle?}，"
+                "layout 取 cover|section|content|end（默认 content）；"
+                "封面/结尾缺省时自动补齐；关键数字写成「数值 说明」短句会渲染成数字卡片"
+            ),
             parameters={
                 "type": "object",
                 "properties": {
                     "title": {"type": "string"},
+                    "theme": {"type": "string", "enum": SLIDE_THEMES.split("|")},
                     "slides": {
                         "type": "array",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "title": {"type": "string"},
+                                "subtitle": {"type": "string"},
+                                "layout": {
+                                    "type": "string",
+                                    "enum": ["cover", "section", "content", "end"],
+                                },
                                 "bullets": {"type": "array", "items": {"type": "string"}},
                             },
                             "required": ["title"],

@@ -122,19 +122,22 @@ async def test_save_slides_html_and_pptx(registry, storage):
                 "title": "述职",
                 "slides": [
                     {"title": "背景", "bullets": ["业务扩张"]},
-                    {"title": "成果", "bullets": ["收入+30%", "NPS 提升"]},
+                    {"title": "成果", "bullets": ["收入 +30%", "NPS 提升"]},
                 ],
             },
         )
     )
     html = storage.read_text(_keys(result)[0])
-    assert html.count("class='slide'") == 2
-    assert "收入+30%" in html
+    # 自动三明治：2 内容页 + 自动封面/结尾 = 4 页
+    assert html.count('class="slide') == 4
+    assert 'class="slide cover"' in html and 'class="slide end"' in html
+    assert "NPS 提升" in html
+    assert "收入" in html
 
     from pptx import Presentation
 
     prs = Presentation(io.BytesIO(storage.read(f"{USER}/{TASK}/v1/slides.pptx")))
-    assert len(prs.slides) == 2
+    assert len(prs.slides) == 4
 
 
 async def test_save_slides_requires_pages(registry):

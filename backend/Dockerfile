@@ -22,6 +22,7 @@ RUN uv run playwright install --with-deps chromium
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
+COPY skills ./skills
 COPY scripts ./scripts
 
 EXPOSE 8001

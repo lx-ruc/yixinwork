@@ -45,17 +45,20 @@ def build_agent_graph(
     inbox: asyncio.Queue,
     checkpointer,
     on_llm_usage: Callable[[Any, int], Coroutine] | None = None,
+    system_prompt_extra: str = "",
 ):
     """llm: chat model（此处统一 bind_tools）；inbox: 执行中插话队列（runner 持有）。
 
     on_llm_usage: 每轮 LLM 调用后回调 (ai_message, elapsed_ms)，用量埋点用；
     回调自身负责吞异常，不得影响执行流。
+    system_prompt_extra: 追加到系统提示尾部（如可用技能清单），每次调用前置。
     """
     llm = llm.bind_tools(registry.openai_schemas())
+    system_prompt = SYSTEM_PROMPT if not system_prompt_extra else f"{SYSTEM_PROMPT}\n\n{system_prompt_extra}"
     async def agent_node(state: AgentState) -> dict:
         started = time.monotonic()
         # 系统提示不入 state（每次调用前置；检查点保持纯对话史）
-        ai = await llm.ainvoke([SystemMessage(content=SYSTEM_PROMPT), *state["messages"]])
+        ai = await llm.ainvoke([SystemMessage(content=system_prompt), *state["messages"]])
         if on_llm_usage is not None:
             await on_llm_usage(ai, int((time.monotonic() - started) * 1000))
         return {"messages": [ai], "iterations": 1}

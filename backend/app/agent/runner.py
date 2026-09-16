@@ -15,6 +15,7 @@ from langgraph.types import Command
 from sqlalchemy.orm import sessionmaker
 
 from app.agent.graph import STEERING_PREFIX, build_agent_graph
+from app.skills import skills_hint
 from app.models import (
     TASK_DELIVERED,
     TASK_FAILED,
@@ -73,6 +74,7 @@ class TaskRunner:
             inbox=self.inbox,
             checkpointer=checkpointer,
             on_llm_usage=self._on_llm_usage,
+            system_prompt_extra=skills_hint(),
         )
         self._db_factory = db_factory
         self._session_id = session_id

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     )
     storage_root: str = "./data/artifacts"
 
+    # 运行时技能目录（<dir>/<skill-name>/SKILL.md；相对 CWD 解析）
+    skills_dir: str = "skills"
+
     # 代码沙箱（模型生成代码的 Docker 隔离执行）
     sandbox_image: str = "yixin-sandbox:latest"
     sandbox_timeout_seconds: int = 60
