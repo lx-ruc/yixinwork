@@ -298,8 +298,13 @@ def register_artifact_tools(registry: ToolRegistry) -> None:
                 "保存幻灯片产物（HTML 预览 + pptx）。"
                 f"theme 按内容气质选：{SLIDE_THEMES}；"
                 "slides 每页 {title, bullets[], layout?, subtitle?}，"
-                "layout 取 cover|section|content|end（默认 content）；"
-                "封面/结尾缺省时自动补齐；关键数字写成「数值 说明」短句会渲染成数字卡片"
+                "layout 取 cover|agenda|section|content|end（默认 content）；"
+                "封面/结尾缺省时自动补齐。数据句式规则：要点写成「数值 简短说明」"
+                "（如「37% 复购率提升」）会被自动放大成数字卡片；整页都是数据要点时"
+                "渲染为 KPI 大数字网格。封面 bullets 填 2-3 条数字钩子"
+                "（如「120家 三年新开门店」）会显示为大数字标签；"
+                "内容页 subtitle 用作 6-10 字眉题（章节归属，如「市场机会」）；"
+                "总页数 ≥6 时第 2 页用 layout=agenda 放目录（bullets=各章标题）"
             ),
             parameters={
                 "type": "object",
@@ -315,7 +320,7 @@ def register_artifact_tools(registry: ToolRegistry) -> None:
                                 "subtitle": {"type": "string"},
                                 "layout": {
                                     "type": "string",
-                                    "enum": ["cover", "section", "content", "end"],
+                                    "enum": ["cover", "agenda", "section", "content", "end"],
                                 },
                                 "bullets": {"type": "array", "items": {"type": "string"}},
                             },
