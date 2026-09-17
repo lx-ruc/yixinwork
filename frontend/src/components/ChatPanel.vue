@@ -52,6 +52,51 @@ async function onSend() {
   }
 }
 
+/** 上传附件：支持文档/表格/文本（后端按类型抽取内容给模型）。 */
+const ACCEPT = '.txt,.md,.markdown,.csv,.tsv,.json,.log,.xml,.yaml,.yml,.html,.htm,.pdf,.docx,.xlsx,.py,.js,.ts,.css,.sql,.ini'
+const fileRef = ref<HTMLInputElement | null>(null)
+
+function pickFiles() {
+  fileRef.value?.click()
+}
+
+async function onFilesChosen(e: Event) {
+  const target = e.target as HTMLInputElement
+  const files = Array.from(target.files ?? [])
+  target.value = '' // 允许重复选择同一文件
+  if (!files.length) return
+  try {
+    await store.addAttachments(files)
+  } catch (err) {
+    ElMessage.error(`附件上传失败: ${(err as Error).message}`)
+  }
+}
+
+function fmtSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)}KB`
+  return `${bytes}B`
+}
+
+const KIND_LABELS: Record<string, string> = {
+  word: 'DOC',
+  excel: 'XLS',
+  pdf: 'PDF',
+  csv: 'CSV',
+  text: 'TXT',
+}
+
+function kindLabel(kind: string): string {
+  return KIND_LABELS[kind] ?? 'FILE'
+}
+
+/** 气泡内展示的附件元信息（extra 里还带全文文本，仅取展示字段）。 */
+function attsOf(m: MessageInfo): { name: string; size: number; kind: string }[] {
+  const atts = (m.extra as { attachments?: { name: string; size: number; kind: string }[] } | null)
+    ?.attachments
+  return atts ?? []
+}
+
 function usePrompt(text: string) {
   input.value = text
   inputRef.value?.focus()
@@ -220,6 +265,12 @@ watch(
         <div v-else class="msg-row" :class="m.role">
           <div v-if="m.role === 'assistant' && !isStreamingMsg(m)" class="bubble assistant md" v-html="renderMd(m.content)" />
           <div v-else class="bubble" :class="m.role">
+            <div v-if="attsOf(m).length" class="bubble-atts">
+              <span v-for="a in attsOf(m)" :key="a.name" class="bubble-att">
+                <span class="chip-kind" :data-kind="a.kind">{{ kindLabel(a.kind) }}</span>
+                <span class="chip-name" :title="a.name">{{ a.name }}</span>
+              </span>
+            </div>
             <span class="content">{{ m.content }}</span>
             <span v-if="isStreamingMsg(m)" class="cursor">▌</span>
           </div>
@@ -236,7 +287,30 @@ watch(
         </el-button>
         <span class="hint">或直接在下方输入修改意见</span>
       </div>
+      <!-- 待发附件：名称 + 大小，可移除 -->
+      <div v-if="store.pendingAttachments.length" class="attach-row">
+        <span v-for="a in store.pendingAttachments" :key="a.id" class="attach-chip">
+          <span class="chip-kind" :data-kind="a.kind">{{ kindLabel(a.kind) }}</span>
+          <span class="chip-name" :title="a.name">{{ a.name }}</span>
+          <span class="chip-size">{{ fmtSize(a.size) }}</span>
+          <button type="button" class="chip-x" aria-label="移除附件" @click="store.removeAttachment(a.id)">×</button>
+        </span>
+      </div>
       <div class="input-row">
+        <button
+          type="button"
+          class="attach-btn"
+          title="上传附件（文档/表格/文本）"
+          :disabled="!store.currentSession || store.streaming || store.uploading"
+          @click="pickFiles"
+        >
+          <svg v-if="store.uploading" class="spin" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="42" stroke-dashoffset="14" />
+          </svg>
+          <svg v-else viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M21.4 11.1 12.5 20a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.4 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
         <el-input
           ref="inputRef"
           v-model="input"
@@ -257,6 +331,7 @@ watch(
           发送
         </el-button>
       </div>
+      <input ref="fileRef" type="file" multiple :accept="ACCEPT" class="file-input" @change="onFilesChosen" />
     </footer>
   </div>
 </template>
@@ -640,5 +715,131 @@ watch(
   height: 54px;
   border-radius: 10px;
   padding: 0 22px;
+}
+
+/* 附件：上传按钮与输入区同高贴底，chips 一行放不下时换行 */
+.attach-btn {
+  flex-shrink: 0;
+  width: 42px;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--yx-line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--yx-ink-2);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
+}
+.attach-btn:hover:not(:disabled) {
+  border-color: var(--yx-red);
+  color: var(--yx-red);
+}
+.attach-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.file-input {
+  display: none;
+}
+.attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 0 8px;
+}
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 280px;
+  padding: 3px 6px 3px 3px;
+  border: 1px solid var(--yx-line);
+  border-radius: 7px;
+  background: #fff;
+  font-size: 12px;
+  color: var(--yx-ink-2);
+}
+.chip-kind {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--yx-red-wash);
+  color: var(--yx-red);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chip-size {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--yx-ink-3);
+}
+.chip-x {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--yx-ink-3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.chip-x:hover {
+  background: var(--yx-red-wash);
+  color: var(--yx-red);
+}
+/* 已发送消息气泡内的附件：只读展示（用户气泡为朱砂底，用半透明白 chip） */
+.bubble-atts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+.bubble-att {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  padding: 2px 8px 2px 2px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 12px;
+}
+.bubble-att .chip-kind {
+  background: rgba(255, 255, 255, 0.32);
+  color: inherit;
+}
+.bubble-att .chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 上传中的转圈 */
+.spin {
+  animation: attach-spin 0.9s linear infinite;
+}
+@keyframes attach-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
 }
 </style>

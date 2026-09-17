@@ -14,6 +14,8 @@ class Settings(BaseSettings):
         "postgresql+psycopg://agent:agent@localhost:5433/agent_platform"
     )
     storage_root: str = "./data/artifacts"
+    # 附件上传暂存目录（发送时合并进消息后即删）
+    upload_root: str = "./data/uploads"
 
     # 运行时技能目录（<dir>/<skill-name>/SKILL.md；相对 CWD 解析）
     skills_dir: str = "skills"

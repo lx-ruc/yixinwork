@@ -26,6 +26,7 @@ from app.models import (
     TASK_RUNNING,
     Task,
 )
+from app.services.attachment_service import content_with_attachments, extra_with_attachments
 from app.services.chat_service import message_dict, persist_message
 from app.tools import get_tool_registry
 
@@ -96,16 +97,22 @@ async def stream_work_message(
     session: ChatSession,
     user_id: str,
     content: str,
+    attachments: list[dict] | None = None,
     llm,
     checkpointer,
     db_factory: sessionmaker,
 ) -> AsyncIterator[dict]:
     """工作模式消息总入口（消息语义由当前任务状态决定）。"""
     session_id = session.id
+    # 给 LLM 的指令附上附件文本；库里的消息内容保持用户原文
+    instruction = content_with_attachments(content, attachments)
     with db_factory() as db:
         latest = get_latest_task(db, session_id, user_id)
         latest_info = task_dict(latest) if latest else None
-        user_msg = persist_message(db, session, user_id, ROLE_USER, content)
+        user_msg = persist_message(
+            db, session, user_id, ROLE_USER, content,
+            extra=extra_with_attachments(attachments),
+        )
         yield {"type": "user_message", "message": message_dict(user_msg)}
 
     # 卡死自愈：任务非终态/非预览态，但进程内没有执行器（如断连残留的
@@ -137,7 +144,7 @@ async def stream_work_message(
             checkpointer=checkpointer,
             db_factory=db_factory,
         )
-        async for event in runner.start(content):
+        async for event in runner.start(instruction):
             yield event
         return
 
@@ -146,7 +153,7 @@ async def stream_work_message(
         if runner is None:  # 上面自愈未覆盖的窗口（自查时仍在执行）：明确报错而非闷头入队
             yield {"type": "error", "detail": "任务执行器不可用，请稍后重试"}
             return
-        runner.steer(content)
+        runner.steer(instruction)
         yield {"type": "steering_queued", "task_id": latest_info["id"], "content": content}
         return
 
@@ -161,7 +168,7 @@ async def stream_work_message(
             db_factory=db_factory,
         )
         yield {"type": "task_revising", "task_id": latest_info["id"]}
-        async for event in runner.resume("revise", instruction=content):
+        async for event in runner.resume("revise", instruction=instruction):
             yield event
         return
 
@@ -178,6 +185,10 @@ async def stream_confirmed_task(
     db_factory: sessionmaker,
 ) -> AsyncIterator[dict]:
     """确认卡片后携带原消息进入工作模式：原消息不重复落库，直接成为任务指令。"""
+    # 原消息可能带附件（路由卡阶段已并入 extra），任务指令同样注入其文本
+    instruction = content_with_attachments(
+        message.content, (message.extra or {}).get("attachments")
+    )
     new_task = _create_task(
         db_factory, session.id, user_id, instruction=message.content
     )
@@ -192,7 +203,7 @@ async def stream_confirmed_task(
         checkpointer=checkpointer,
         db_factory=db_factory,
     )
-    async for event in runner.start(message.content):
+    async for event in runner.start(instruction):
         yield event
 
 

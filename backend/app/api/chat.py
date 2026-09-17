@@ -28,6 +28,7 @@ from app.services.chat_service import (
     stream_route_gate,
     update_route_status,
 )
+from app.services.attachment_service import AttachmentError, load_staged
 from app.services.session_service import get_owned_session
 from app.services.work_service import stream_confirmed_task, stream_work_message
 
@@ -69,12 +70,19 @@ def send_message(
 ) -> StreamingResponse:
     session = get_owned_session(db, user, session_id)
 
+    # 暂存附件随消息合并（取回即删）；上传与发送之间文件在服务器暂存
+    try:
+        attachments = load_staged(user, [a.id for a in payload.attachments])
+    except AttachmentError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+
     if session.mode == MODE_WORK:
         return sse_response_async(
             stream_work_message(
                 session=session,
                 user_id=user,
                 content=payload.content,
+                attachments=attachments,
                 llm=agent_llm,
                 checkpointer=checkpointer,
                 db_factory=db_factory,
@@ -85,6 +93,7 @@ def send_message(
             session=session,
             user_id=user,
             content=payload.content,
+            attachments=attachments,
             llm=llm,
             db_factory=db_factory,
         )

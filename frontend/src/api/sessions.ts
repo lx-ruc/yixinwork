@@ -101,7 +101,13 @@ export const streamMessage = (
   sessionId: string,
   content: string,
   onEvent: (ev: StreamEvent) => void,
-) => ssePost(`/sessions/${sessionId}/messages`, { content }, onEvent)
+  attachmentIds: string[] = [],
+) =>
+  ssePost(
+    `/sessions/${sessionId}/messages`,
+    { content, attachments: attachmentIds.map((id) => ({ id })) },
+    onEvent,
+  )
 
 /** 确认卡片动作：confirm=进入工作模式；decline=原消息直答。 */
 export const routeConfirm = (

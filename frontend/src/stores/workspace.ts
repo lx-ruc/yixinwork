@@ -16,6 +16,7 @@ import {
   type MessageInfo,
   type SessionInfo,
 } from '../api/sessions'
+import { uploadAttachments, type AttachmentMeta } from '../api/uploads'
 
 /** 确认卡片在消息流中的伪消息角色（对应后端 route_card 事件）。 */
 export type CardEntry = MessageInfo & {
@@ -75,6 +76,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function selectSession(s: SessionInfo) {
     currentSession.value = s
+    pendingAttachments.value = [] // 待发附件不跨会话携带
     const [raw, tasks] = await Promise.all([
       listMessages(s.id),
       listTasks(s.id).catch(() => []),
@@ -114,12 +116,32 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (idx >= 0) sessions.value[idx] = updated
   }
 
+  /** 待发附件（已上传暂存）；服务端确认收到消息（user_message）后清空。 */
+  const pendingAttachments = ref<AttachmentMeta[]>([])
+  const uploading = ref(false)
+
+  /** 选择文件即上传暂存（失败抛给组件提示；成功后追加到待发列表）。 */
+  async function addAttachments(files: File[]) {
+    uploading.value = true
+    try {
+      const metas = await uploadAttachments(files)
+      pendingAttachments.value = [...pendingAttachments.value, ...metas]
+    } finally {
+      uploading.value = false
+    }
+  }
+
+  function removeAttachment(id: string) {
+    pendingAttachments.value = pendingAttachments.value.filter((a) => a.id !== id)
+  }
+
   /** 发送消息：SSE 事件驱动渲染（语义由后端按会话模式/任务状态决定）。 */
   async function send(content: string) {
     if (!currentSession.value || streaming.value) return
     streaming.value = true
+    const attachmentIds = pendingAttachments.value.map((a) => a.id)
     try {
-      await streamMessage(currentSession.value.id, content, handleEvent)
+      await streamMessage(currentSession.value.id, content, handleEvent, attachmentIds)
     } finally {
       streaming.value = false
       void syncAutoTitle()
@@ -248,6 +270,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (ev.type !== 'reasoning_delta' && !PROCESS_EVENTS.has(ev.type)) closeThinking()
     if (ev.type === 'user_message') {
       messages.value.push(ev.message)
+      pendingAttachments.value = [] // 服务端已并入消息，待发列表清空
     } else if (ev.type === 'reasoning_delta') {
       appendReason(ev.content)
     } else if (ev.type === 'delta') {
@@ -376,11 +399,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     streaming,
     activePreview,
     artifacts,
+    pendingAttachments,
+    uploading,
     refreshSessions,
     newSession,
     selectSession,
     switchMode,
     send,
+    addAttachments,
+    removeAttachment,
     resolveRoute,
     approvePreview,
     refreshArtifacts,

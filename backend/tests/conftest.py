@@ -26,6 +26,7 @@ def _tmp_storage(tmp_path, monkeypatch):
     from app.storage import get_storage
 
     monkeypatch.setenv("STORAGE_ROOT", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("UPLOAD_ROOT", str(tmp_path / "uploads"))
     monkeypatch.setenv("RATE_LIMIT_REQUESTS", "0")  # 限流默认关闭（专项测试自行开启）
     get_settings.cache_clear()
     get_storage.cache_clear()

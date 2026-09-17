@@ -18,6 +18,7 @@ from app.models import (
     ROLE_ASSISTANT,
     ROLE_USER,
 )
+from app.services.attachment_service import content_with_attachments, extra_with_attachments
 from app.services.routing import RouteDecision, get_classifier
 from app.services.usage_service import record_llm_call
 
@@ -53,12 +54,22 @@ def get_history(db: Session, session_id: str, user_id: str) -> list[Message]:
     return list(reversed(db.scalars(stmt).all()))
 
 
-def build_llm_messages(history: list[Message], user_content: str) -> list[dict]:
+def build_llm_messages(
+    history: list[Message],
+    user_content: str,
+    attachments: list[dict] | None = None,
+) -> list[dict]:
+    """LLM 视图：历史与本条消息的附件文本拼在 content 后（展示内容不受污染）。"""
     messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
     for m in history:
         if m.role in ("user", "assistant"):
-            messages.append({"role": m.role, "content": m.content})
-    messages.append({"role": "user", "content": user_content})
+            extra_atts = (m.extra or {}).get("attachments")
+            messages.append(
+                {"role": m.role, "content": content_with_attachments(m.content, extra_atts)}
+            )
+    messages.append(
+        {"role": "user", "content": content_with_attachments(user_content, attachments)}
+    )
     return messages
 
 
@@ -67,14 +78,17 @@ def stream_direct_answer(
     session: ChatSession,
     user_id: str,
     content: str,
+    attachments: list[dict] | None = None,
     llm,
     db_factory: sessionmaker,
 ) -> Iterator[dict]:
     """流式直答主流程：独立数据库会话（SSE 生命周期长于请求依赖）。"""
     with db_factory() as db:
         # 先装配历史（不含本条），再落用户消息，顺序清晰
-        messages = build_llm_messages(get_history(db, session.id, user_id), content)
-        user_msg = persist_message(db, session, user_id, ROLE_USER, content)
+        messages = build_llm_messages(get_history(db, session.id, user_id), content, attachments)
+        user_msg = persist_message(
+            db, session, user_id, ROLE_USER, content, extra=extra_with_attachments(attachments)
+        )
         yield {"type": "user_message", "message": message_dict(user_msg)}
         yield from _answer_stream(
             db=db,
@@ -91,6 +105,7 @@ def stream_route_gate(
     session: ChatSession,
     user_id: str,
     content: str,
+    attachments: list[dict] | None = None,
     llm,
     db_factory: sessionmaker,
 ) -> Iterator[dict]:
@@ -98,14 +113,15 @@ def stream_route_gate(
     decision = get_classifier().classify(content)
     if not decision.is_task:
         yield from stream_direct_answer(
-            session=session, user_id=user_id, content=content, llm=llm,
-            db_factory=db_factory,
+            session=session, user_id=user_id, content=content, attachments=attachments,
+            llm=llm, db_factory=db_factory,
         )
         return
 
     with db_factory() as db:
         user_msg = persist_message(
-            db, session, user_id, ROLE_USER, content, extra=_route_extra(decision)
+            db, session, user_id, ROLE_USER, content,
+            extra=extra_with_attachments(attachments, _route_extra(decision)),
         )
         yield {"type": "user_message", "message": message_dict(user_msg)}
         yield {
@@ -129,7 +145,10 @@ def stream_declined_answer(
         messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
         for m in get_history(db, session.id, user_id):
             if m.role in ("user", "assistant"):
-                messages.append({"role": m.role, "content": m.content})
+                extra_atts = (m.extra or {}).get("attachments")
+                messages.append(
+                    {"role": m.role, "content": content_with_attachments(m.content, extra_atts)}
+                )
         yield from _answer_stream(
             db=db,
             session=session,
