@@ -10,6 +10,9 @@ onMounted(async () => {
     await store.refreshSessions()
     if (store.sessions.length > 0) {
       await store.selectSession(store.sessions[0])
+    } else {
+      // 首次进入:自动备好一个会话,别让用户对着禁用的输入框找"新建"
+      await store.newSession()
     }
   } catch (e) {
     ElMessage.error(`加载会话失败: ${(e as Error).message}`)
